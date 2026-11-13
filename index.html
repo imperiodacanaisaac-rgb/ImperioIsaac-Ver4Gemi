@@ -63,15 +63,26 @@
       padding-bottom: 90px !important;
     }
 
+    /* REGRAS DE IMPRESSÃO DIFERENCIADAS (CUPOM vs RELATÓRIO DO CAIXA) */
     @media print {
       body * { visibility: hidden; }
-      body.print-report #printable-report, body.print-report #printable-report * { visibility: visible; }
-      body.print-report #printable-report {
-        position: absolute; left: 0; top: 0; width: 100%; padding: 15px; font-family: Arial, sans-serif; color: #000; background: #fff;
+      
+      /* Modo Impressão do Relatório Diário */
+      body.print-report #printable-report, body.print-report #printable-report * {
+        visibility: visible;
       }
-      body.print-ticket #printable-ticket, body.print-ticket #printable-ticket * { visibility: visible; }
+      body.print-report #printable-report {
+        position: absolute; left: 0; top: 0; width: 100%;
+        padding: 15px; font-family: Arial, sans-serif; color: #000; background: #fff;
+      }
+
+      /* Modo Impressão da Comanda Térmica */
+      body.print-ticket #printable-ticket, body.print-ticket #printable-ticket * {
+        visibility: visible;
+      }
       body.print-ticket #printable-ticket {
-        position: absolute; left: 0; top: 0; width: 100%; max-width: 80mm; padding: 5px; font-family: monospace; font-size: 12px; color: #000; background: #fff;
+        position: absolute; left: 0; top: 0; width: 100%; max-width: 80mm;
+        padding: 5px; font-family: monospace; font-size: 12px; color: #000; background: #fff;
       }
     }
   </style>
@@ -154,6 +165,7 @@
         return () => clearTimeout(timer);
       }, [activeTab, currentUser, cart, orders]);
 
+      // CONEXÃO FIRESTORE
       useEffect(() => {
         if (db && currentUser) {
           const unsubscribe = db.collection('orders').orderBy('createdAt', 'desc').onSnapshot(
@@ -218,11 +230,13 @@
 
       const cartTotal = useMemo(() => cart.reduce((acc, i) => acc + (i.price * i.quantity), 0), [cart]);
 
+      // GERADOR DE NUMERAÇÃO DE COMANDA QUE RESETA DIARIAMENTE
       const generateDailyNextOrderNum = () => {
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = new Date().toISOString().split('T')[0]; // Ex: 2026-11-09
         const todayOrders = orders.filter(o => o.createdAt && o.createdAt.startsWith(todayStr));
         const nextNum = todayOrders.length + 1;
-        return `CMD-${String(nextNum).padStart(3, '0')}`;
+        const formattedNum = String(nextNum).padStart(3, '0'); // Ex: 001, 002
+        return `CMD-${formattedNum}`;
       };
 
       const handleCreateOrder = async () => {
@@ -283,17 +297,23 @@
         } catch(e) {}
       };
 
+      // DISPARAR IMPRESSÃO DE COMANDA INDIVIDUAL
       const handlePrintTicket = (order) => {
         setPrintingOrder(order);
         document.body.classList.remove('print-report');
         document.body.classList.add('print-ticket');
-        setTimeout(() => { window.print(); }, 200);
+        setTimeout(() => { 
+          window.print(); 
+        }, 200);
       };
 
+      // DISPARAR IMPRESSÃO DO RELATÓRIO DO CAIXA DIÁRIO
       const handlePrintCashReport = () => {
         document.body.classList.remove('print-ticket');
         document.body.classList.add('print-report');
-        setTimeout(() => { window.print(); }, 200);
+        setTimeout(() => { 
+          window.print(); 
+        }, 200);
       };
 
       const cashReport = useMemo(() => {
@@ -330,7 +350,7 @@
           }
         });
 
-        return { todayOrders, totalOrders: todayOrders.length, totalRevenue, pastelCount, pastelRevenue, beverageCount, beverageRevenue, payments };
+        return { todayStr, todayOrders, totalOrders: todayOrders.length, totalRevenue, pastelCount, pastelRevenue, beverageCount, beverageRevenue, payments };
       }, [orders]);
 
       if (!currentUser) {
@@ -344,7 +364,7 @@
             <div className="flex items-center space-x-3">
               <img
                 src={OFFICIAL_HERO_IMG}
-                alt="Logo"
+                alt="Império Da Cana Logo"
                 className="w-10 h-10 rounded-xl object-cover border-2 border-yellow-400 shadow-md bg-white"
               />
               <div>
@@ -405,6 +425,7 @@
           </aside>
 
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 fade-in">
+
             {activeTab === 'dashboard' && currentUser.role !== 'ATENDENTE' && (
               <div className="space-y-5">
                 <div className="bg-gradient-to-br from-emerald-900 via-imperio-green to-emerald-950 text-white p-6 rounded-3xl shadow-xl border border-emerald-700/50">
@@ -724,6 +745,7 @@
                 })}
               </div>
             )}
+
           </main>
 
           <nav className="md:hidden fixed bottom-0 left-0 right-0 glass-header border-t border-emerald-800/80 px-2 py-2 flex justify-around items-center z-40">
@@ -789,6 +811,216 @@
             </div>
           )}
 
+          {/* ESTRUTURA 1: IMPRESSÃO DA COMANDA INDIVIDUAL (CUPOM) */}
           {printingOrder && (
             <div id="printable-ticket">
-              <div style={{ textAlign: 'center', marginBottom: '10
+              <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+                <h2 style={{ fontSize: '16px', fontWeight: 'bold', margin: 0 }}>IMPÉRIO DA CANA</h2>
+                <p style={{ fontSize: '10px', margin: 0 }}>PASTEL E CALDO DE CANA - DESDE 2015</p>
+                <p style={{ fontSize: '10px', margin: 0 }}>Tel: (14) 99843-8050</p>
+                <hr style={{ borderStyle: 'dashed', margin: '5px 0' }} />
+              </div>
+
+              <div>
+                <p style={{ margin: '2px 0' }}><strong>COMANDA: {printingOrder.id}</strong></p>
+                <p style={{ margin: '2px 0' }}>Cliente: {printingOrder.customer}</p>
+                <p style={{ margin: '2px 0' }}>Local: {printingOrder.type}</p>
+                <p style={{ margin: '2px 0' }}>Data: {new Date(printingOrder.createdAt).toLocaleString('pt-BR')}</p>
+                <hr style={{ borderStyle: 'dashed', margin: '5px 0' }} />
+              </div>
+
+              <div style={{ marginBottom: '10px' }}>
+                <p style={{ fontWeight: 'bold', margin: '3px 0' }}>ITENS:</p>
+                {printingOrder.items && printingOrder.items.map((it, idx) => (
+                  <div key={idx} style={{ marginBottom: '4px' }}>
+                    <div>{it.quantity}x {it.nameWithFlavor || it.name} - R$ {(it.price * it.quantity).toFixed(2)}</div>
+                  </div>
+                ))}
+              </div>
+
+              <hr style={{ borderStyle: 'dashed', margin: '5px 0' }} />
+              <div style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '14px' }}>
+                TOTAL: R$ {printingOrder.total ? printingOrder.total.toFixed(2) : '0.00'}
+              </div>
+            </div>
+          )}
+
+          {/* ESTRUTURA 2: IMPRESSÃO DO RELATÓRIO DO CAIXA DIÁRIO */}
+          <div id="printable-report">
+            <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+              <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>IMPÉRIO DA CANA</h1>
+              <h3 style={{ fontSize: '14px', margin: '5px 0' }}>RELATÓRIO DE FECHAMENTO DE CAIXA</h3>
+              <p style={{ fontSize: '12px', color: '#555', margin: 0 }}>Data do Fechamento: {new Date().toLocaleDateString('pt-BR')}</p>
+              <hr style={{ margin: '10px 0', borderColor: '#ccc' }} />
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <h4 style={{ margin: '5px 0', fontSize: '14px', borderBottom: '1px solid #000', paddingBottom: '3px' }}>RESUMO GERAL</h4>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>Total de Comandas Liquidadas: <strong>{cashReport.totalOrders}</strong></p>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>Pastéis Vendidos: <strong>{cashReport.pastelCount} unid.</strong> (R$ {cashReport.pastelRevenue.toFixed(2)})</p>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>Bebidas / Caldo: <strong>{cashReport.beverageCount} unid.</strong> (R$ {cashReport.beverageRevenue.toFixed(2)})</p>
+              <p style={{ margin: '6px 0', fontSize: '16px', fontWeight: 'bold' }}>FATURAMENTO TOTAL: R$ {cashReport.totalRevenue.toFixed(2)}</p>
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <h4 style={{ margin: '5px 0', fontSize: '14px', borderBottom: '1px solid #000', paddingBottom: '3px' }}>DETALHAMENTO POR FORMA DE PAGAMENTO</h4>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>• PIX: <strong>R$ {cashReport.payments.PIX.toFixed(2)}</strong></p>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>• DINHEIRO: <strong>R$ {cashReport.payments.Dinheiro.toFixed(2)}</strong></p>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>• CARTÃO: <strong>R$ {cashReport.payments.Cartão.toFixed(2)}</strong></p>
+            </div>
+
+            <div>
+              <h4 style={{ margin: '5px 0', fontSize: '14px', borderBottom: '1px solid #000', paddingBottom: '3px' }}>RELAÇÃO DE COMANDAS DO DIA</h4>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginTop: '5px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #aaa', textAlign: 'left' }}>
+                    <th style={{ padding: '4px' }}>Comanda</th>
+                    <th style={{ padding: '4px' }}>Cliente</th>
+                    <th style={{ padding: '4px' }}>Pagamento</th>
+                    <th style={{ padding: '4px', textAlign: 'right' }}>Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cashReport.todayOrders && cashReport.todayOrders.map((o, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '4px' }}>{o.id}</td>
+                      <td style={{ padding: '4px' }}>{o.customer}</td>
+                      <td style={{ padding: '4px' }}>{o.paymentMethod || 'Pendente'}</td>
+                      <td style={{ padding: '4px', textAlign: 'right' }}>R$ {(o.total || 0).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      );
+    }
+
+    function LoginScreen({ onLoginSuccess }) {
+      const [username, setUsername] = useState('atendente');
+      const [password, setPassword] = useState('atendente123');
+      const [error, setError] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      const handleLoginSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+
+        try {
+          if (auth && db) {
+            const email = username.includes('@') ? username.trim() : `${username.trim()}@imperiodacana.com`;
+            const userCredential = await auth.signInWithEmailAndPassword(email, password);
+            const uid = userCredential.user.uid;
+
+            const userDoc = await db.collection('usuarios').doc(uid).get();
+
+            if (userDoc.exists) {
+              const data = userDoc.data();
+              if (data.ativo) {
+                onLoginSuccess(data);
+                setLoading(false);
+                return;
+              } else {
+                setError('Este usuário está inativo no sistema.');
+              }
+            } else {
+              setError('Perfil não encontrado no Firestore!');
+            }
+          }
+        } catch (err) {
+          console.error("Erro no login Firebase Auth:", err);
+          if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+            setError('Usuário ou senha incorretos.');
+          } else {
+            setError('Erro ao autenticar com o banco.');
+          }
+        }
+        setLoading(false);
+      };
+
+      const fillCreds = (user, pass) => {
+        setUsername(user);
+        setPassword(pass);
+        setError('');
+      };
+
+      return (
+        <div className="min-h-screen bg-imperio-green flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden max-w-sm w-full border-4 border-yellow-400 p-6 space-y-6 fade-in">
+            
+            <div className="text-center space-y-2">
+              <img
+                src={OFFICIAL_HERO_IMG}
+                alt="Império Da Cana Logo"
+                className="w-24 h-24 mx-auto rounded-2xl object-cover border-4 border-yellow-400 shadow-xl bg-white"
+              />
+              <h1 className="text-2xl font-black text-emerald-950 tracking-wide">IMPÉRIO DA CANA</h1>
+              <p className="text-xs font-bold text-slate-500">Agudos, SP • Tel: (14) 99843-8050</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Perfis Rápidos:</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                <button type="button" onClick={() => fillCreds('atendente', 'atendente123')} className="py-2 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl font-extrabold text-xs">
+                  Atendente
+                </button>
+                <button type="button" onClick={() => fillCreds('admin', 'admin123')} className="py-2 bg-yellow-50 border border-yellow-300 text-yellow-900 rounded-xl font-extrabold text-xs">
+                  Gerente
+                </button>
+                <button type="button" onClick={() => fillCreds('dev', 'dev123')} className="py-2 bg-purple-50 border border-purple-200 text-purple-900 rounded-xl font-extrabold text-xs">
+                  Dev
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleLoginSubmit} className="space-y-4">
+              {error && (
+                <div className="p-3 bg-red-100 text-red-700 text-xs rounded-xl font-bold text-center">
+                  {error}
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Usuário</label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-700"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Senha</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-700"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3.5 bg-imperio-green hover:bg-emerald-900 text-yellow-400 font-black rounded-2xl text-sm transition shadow-xl active:scale-98 flex items-center justify-center gap-2"
+              >
+                {loading ? 'Autenticando...' : 'Entrar no Sistema'}
+              </button>
+            </form>
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
