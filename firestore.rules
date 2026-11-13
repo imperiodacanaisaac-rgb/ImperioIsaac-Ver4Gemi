@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    function profile() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    // Usuário autenticado, com perfil existente e ativo
+    function isActive() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && profile().ativo == true;
+    }
+
+    // Cada usuário lê só o próprio perfil; ninguém altera perfis pelo app
+    match /usuarios/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // Pedidos: sem exclusão pelo app
+    match /orders/{orderId} {
+      allow read, create, update: if isActive();
+      allow delete: if false;
+    }
+
+    // Contador diário de comandas
+    match /counters/{day} {
+      allow read, write: if isActive();
+    }
+  }
+}

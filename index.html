@@ -2,96 +2,85 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#024723" />
-  <title>Império da Cana - Gestão Comercial</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Império Da Cana - Gestão Comercial</title>
+  
+  <!-- Tailwind CSS & Lucide Icons -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://unpkg.com/lucide@0.469.0"></script>
 
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://www.babeljs.cn/standalone/babel.min.js"></script>
+  <!-- React & Babel -->
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
 
+  <!-- FIREBASE SDKs COMPAT v10.12.0 -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap');
+    
     * {
-      box-sizing: border-box;
       font-family: 'Plus Jakarta Sans', sans-serif;
       -webkit-tap-highlight-color: transparent;
     }
 
     body {
-      margin: 0;
-      background: #f1f5f9;
+      background-color: #F8FAFC;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
+    input, textarea, select { user-select: text; -webkit-user-select: text; }
     .bg-imperio-green { background-color: #024723; }
+    .bg-imperio-dark { background-color: #013218; }
     .text-imperio-green { color: #024723; }
+    .text-imperio-yellow { color: #EAB308; }
+    .bg-imperio-yellow { background-color: #EAB308; }
+
     .glass-header {
       background: rgba(2, 71, 35, 0.98);
       backdrop-filter: blur(12px);
     }
 
-    .fade-in { animation: fadeIn 0.2s ease-in-out; }
+    .fade-in {
+      animation: fadeIn 0.2s ease-in-out;
+    }
 
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(4px); }
       to { opacity: 1; transform: translateY(0); }
     }
 
-    #printable-ticket,
-    #printable-report {
-      display: none;
+    iframe[src*="netlify"], [class*="netlify"], #netlify-badge, .netlify-badge {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
     }
 
+    @media (max-width: 767px) { .pb-safe-nav { padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px)); } }
+
+    /* IMPRESSÃO: cupom e relatório ficam ocultos na tela e só aparecem ao imprimir */
+    #printable-ticket, #printable-report { display: none; }
     @media print {
-      body * { visibility: hidden !important; }
-
-      body.print-ticket #printable-ticket,
-      body.print-ticket #printable-ticket * {
-        visibility: visible !important;
-      }
-
-      body.print-ticket #printable-ticket {
-        display: block !important;
-        position: absolute;
-        inset: 0 auto auto 0;
-        width: 80mm;
-        padding: 5mm;
-        color: #000;
-        background: #fff;
-        font: 12px monospace;
-      }
-
-      body.print-report #printable-report,
-      body.print-report #printable-report * {
-        visibility: visible !important;
-      }
-
+      body { background: #fff !important; }
+      body.print-ticket #app-shell, body.print-report #app-shell { display: none !important; }
+      body.print-report #printable-ticket, body.print-ticket #printable-report { display: none !important; }
       body.print-report #printable-report {
-        display: block !important;
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        padding: 15px;
-        color: #000;
-        background: #fff;
-        font-family: Arial, sans-serif;
+        display: block; padding: 15px; font-family: Arial, sans-serif; color: #000; background: #fff;
       }
-
-      @page {
-        margin: 8mm;
+      body.print-ticket #printable-ticket {
+        display: block; width: 100%; max-width: 80mm; padding: 5px;
+        font-family: monospace; font-size: 12px; color: #000; background: #fff;
       }
     }
   </style>
 </head>
+<body class="bg-slate-100 text-slate-800 antialiased selection:bg-yellow-400">
 
-<body>
   <div id="root"></div>
 
   <script type="text/babel">
@@ -106,1147 +95,978 @@
 
     let db = null;
     let auth = null;
-    let firebaseInitError = null;
-
     try {
       if (!firebase.apps.length) {
         firebase.initializeApp(firebaseConfig);
       }
-
       db = firebase.firestore();
       auth = firebase.auth();
-    } catch (error) {
-      firebaseInitError = error;
-      console.error("Falha ao inicializar o Firebase:", error);
+      db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+    } catch (e) {
+      console.error("Erro Firebase:", e);
     }
 
-    const { useEffect, useMemo, useState } = React;
-
+    const { useState, useEffect, useMemo } = React;
     const OFFICIAL_HERO_IMG = "./logo.jpg";
-    const FLAVORS = ["Puro", "Limão", "Maracujá", "Caju", "Abacaxi"];
-    const ORDER_STATUSES = ["Aguardando", "Em Fritura", "Pronto", "Entregue"];
-    const PAYMENT_METHODS = ["PIX", "Dinheiro", "Cartão"];
 
     const INITIAL_CATALOG = [
-      { id: 1, name: "Pastel de Carne", category: "Pastéis Salgados", price: 12, desc: "Carne moída especial temperada" },
-      { id: 2, name: "Frango c/ Catupiry", category: "Pastéis Salgados", price: 13, desc: "Frango desfiado com catupiry" },
-      { id: 3, name: "Pastel de Queijo", category: "Pastéis Salgados", price: 12, desc: "Queijo muçarela derretido" },
-      { id: 4, name: "Pastel de Pizza", category: "Pastéis Salgados", price: 14, desc: "Queijo, presunto, tomate e orégano" },
-      { id: 5, name: "Costela c/ Queijo", category: "Pastéis Salgados", price: 17, desc: "Costela desfiada c/ muçarela" },
-      { id: 6, name: "Carne c/ Queijo", category: "Pastéis Salgados", price: 14, desc: "Carne moída c/ muçarela" },
-      { id: 7, name: "Caldo de Cana 500ml", category: "Caldo de Cana", price: 8, desc: "Cana fresca moída na hora", hasFlavor: true },
-      { id: 8, name: "Garrafa Caldo 500ml", category: "Caldo de Cana", price: 9, desc: "Garrafa lacrada 500ml", hasFlavor: true },
-      { id: 9, name: "Garrafa Caldo 1Lt", category: "Caldo de Cana", price: 16, desc: "Garrafa 1 litro", hasFlavor: true },
-      { id: 10, name: "Garrafa Caldo 2Lt", category: "Caldo de Cana", price: 23, desc: "Garrafa família 2 litros", hasFlavor: true },
-      { id: 11, name: "Copo Caldo c/ Abacaxi 500ml", category: "Caldo de Cana", price: 10, desc: "Com pedaços de abacaxi fresco" },
-      { id: 12, name: "Lata Coca-Cola", category: "Bebidas", price: 5, desc: "Lata 350ml" },
-      { id: 13, name: "Lata Fanta", category: "Bebidas", price: 5, desc: "Lata 350ml" },
-      { id: 14, name: "Lata Sprite", category: "Bebidas", price: 5, desc: "Lata 350ml" },
-      { id: 15, name: "Água sem Gás", category: "Bebidas", price: 2, desc: "Garrafa 500ml" }
+      { id: 1, name: 'Pastel de Carne', category: 'Pastéis Salgados', price: 12.00, desc: 'Carne moída especial temperada' },
+      { id: 2, name: 'Frango c/ Catupiry', category: 'Pastéis Salgados', price: 13.00, desc: 'Frango desfiado com catupiry' },
+      { id: 3, name: 'Pastel de Queijo', category: 'Pastéis Salgados', price: 12.00, desc: 'Queijo muçarela derretido' },
+      { id: 4, name: 'Pastel de Pizza', category: 'Pastéis Salgados', price: 14.00, desc: 'Queijo, presunto, tomate e orégano' },
+      { id: 5, name: 'Costela c/ Queijo', category: 'Pastéis Salgados', price: 17.00, desc: 'Costela desfiada c/ muçarela' },
+      { id: 6, name: 'Carne c/ Queijo', category: 'Pastéis Salgados', price: 14.00, desc: 'Carne moída c/ muçarela' },
+      
+      { id: 7, name: 'Caldo de Cana 500ml', category: 'Caldo de Cana', price: 8.00, desc: 'Cana fresca moída na hora', hasFlavor: true },
+      { id: 8, name: 'Garrafa Caldo 500ml', category: 'Caldo de Cana', price: 9.00, desc: 'Garrafa lacrada 500ml', hasFlavor: true },
+      { id: 9, name: 'Garrafa Caldo 1Lt', category: 'Caldo de Cana', price: 16.00, desc: 'Garrafa 1 Litro', hasFlavor: true },
+      { id: 10, name: 'Garrafa Caldo 2Lt', category: 'Caldo de Cana', price: 23.00, desc: 'Garrafa família 2 Litros', hasFlavor: true },
+      { id: 11, name: 'Copo Caldo c/ Abacaxi 500ml', category: 'Caldo de Cana', price: 10.00, desc: 'Com pedaços de abacaxi fresco' },
+      
+      { id: 12, name: 'Lata Coca-Cola', category: 'Bebidas', price: 5.00, desc: 'Lata 350ml' },
+      { id: 13, name: 'Lata Fanta', category: 'Bebidas', price: 5.00, desc: 'Lata 350ml' },
+      { id: 14, name: 'Lata Sprite', category: 'Bebidas', price: 5.00, desc: 'Lata 350ml' },
+      { id: 15, name: 'Água sem Gás', category: 'Bebidas', price: 2.00, desc: 'Garrafa 500ml' }
     ];
 
-    function localDateKey(date = new Date()) {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
-    }
+    const FLAVORS = ['Puro', 'Limão', 'Maracujá', 'Caju', 'Abacaxi'];
 
-    function formatCurrency(value) {
-      const safeValue = Number.isFinite(Number(value)) ? Number(value) : 0;
-      return new Intl.NumberFormat("pt-BR", {
-        style: "currency",
-        currency: "BRL"
-      }).format(safeValue);
-    }
+    // Perfis com acesso ao Caixa. Qualquer outro valor (ou ausência de role) NÃO tem acesso.
+    // Ajuste conforme o campo "role" gravado em usuarios/{uid}.
+    const MANAGER_ROLES = ['ADMIN', 'GERENTE', 'DEV'];
 
-    function formatOrderDate(value) {
-      const date = new Date(value);
-      return Number.isNaN(date.getTime())
-        ? "Data indisponível"
-        : date.toLocaleString("pt-BR");
-    }
+    // Data local (YYYY-MM-DD) — evita o desvio de fuso do toISOString (UTC)
+    const localDate = (d = new Date()) => d.toLocaleDateString('sv-SE');
+    const orderPaidDate = (o) => localDate(new Date(o.closedAt || o.createdAt));
+    const hideImg = (e) => { e.currentTarget.style.display = 'none'; };
 
-    function getOrderBusinessDate(order) {
-      if (typeof order.businessDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(order.businessDate)) {
-        return order.businessDate;
-      }
-
-      if (!order.createdAt) return null;
-
-      const date = new Date(order.createdAt);
-      return Number.isNaN(date.getTime()) ? null : localDateKey(date);
-    }
-
-    function safeItems(items) {
-      return Array.isArray(items) ? items : [];
+    // Ícones Lucide renderizados como HTML estático (não mutam o DOM do React)
+    function Icon({ name, className }) {
+      const html = useMemo(() => {
+        try {
+          const key = name.split('-').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
+          const def = window.lucide && window.lucide.icons && window.lucide.icons[key];
+          if (!def) return '';
+          const el = window.lucide.createElement(def);
+          el.setAttribute('class', className || '');
+          return el.outerHTML;
+        } catch (e) { return ''; }
+      }, [name, className]);
+      return <span className="inline-flex shrink-0" aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />;
     }
 
     function App() {
       const [currentUser, setCurrentUser] = useState(null);
-      const [authLoading, setAuthLoading] = useState(true);
-      const [authError, setAuthError] = useState("");
-      const [activeTab, setActiveTab] = useState("pdv");
+      const [authReady, setAuthReady] = useState(!auth);
+      const [toast, setToast] = useState(null);
+      const [saving, setSaving] = useState(false);
+
+      const [activeTab, setActiveTab] = useState('pdv');
       const [orders, setOrders] = useState([]);
-      const [ordersLoading, setOrdersLoading] = useState(false);
+      const [cart, setCart] = useState([]);
+      const [customerName, setCustomerName] = useState('');
+      const [orderType, setOrderType] = useState('Balcão');
+      const [searchTerm, setSearchTerm] = useState('');
+      const [selectedCategory, setSelectedCategory] = useState('Todos');
       const [isDbConnected, setIsDbConnected] = useState(false);
 
-      const [cart, setCart] = useState([]);
-      const [customerName, setCustomerName] = useState("");
-      const [orderType, setOrderType] = useState("Balcão");
-      const [searchTerm, setSearchTerm] = useState("");
-      const [selectedCategory, setSelectedCategory] = useState("Todos");
       const [flavorModalItem, setFlavorModalItem] = useState(null);
-      const [selectedFlavor, setSelectedFlavor] = useState("Puro");
+      const [selectedFlavor, setSelectedFlavor] = useState('Puro');
       const [printingOrder, setPrintingOrder] = useState(null);
-      const [busyOrderIds, setBusyOrderIds] = useState([]);
 
+      const notify = (msg, type = 'ok') => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3500);
+      };
+
+      // Sessão: a fonte da verdade é o Firebase Auth + perfil em usuarios/{uid}
       useEffect(() => {
-        if (!auth) {
-          setAuthLoading(false);
-          setAuthError("O Firebase não foi inicializado. Verifique a configuração.");
-          return undefined;
-        }
-
-        return auth.onAuthStateChanged(async firebaseUser => {
-          if (!firebaseUser) {
-            setCurrentUser(null);
-            setAuthLoading(false);
-            return;
-          }
-
+        if (!auth || !db) return;
+        return auth.onAuthStateChanged(async (user) => {
+          if (!user) { setCurrentUser(null); setAuthReady(true); return; }
           try {
-            const profileSnapshot = await db.collection("usuarios").doc(firebaseUser.uid).get();
-
-            if (!profileSnapshot.exists) {
-              await auth.signOut();
-              setAuthError("Perfil de usuário não encontrado no sistema.");
+            const snap = await db.collection('usuarios').doc(user.uid).get();
+            if (snap.exists && snap.data().ativo) {
+              setCurrentUser(snap.data());
+            } else {
               setCurrentUser(null);
-              setAuthLoading(false);
-              return;
-            }
-
-            const profile = profileSnapshot.data();
-
-            if (profile.ativo !== true || !["ATENDENTE", "GERENTE", "DEV"].includes(profile.role)) {
               await auth.signOut();
-              setAuthError("Usuário inativo ou sem perfil autorizado.");
-              setCurrentUser(null);
-              setAuthLoading(false);
-              return;
             }
-
-            setCurrentUser({
-              uid: firebaseUser.uid,
-              name: typeof profile.name === "string" && profile.name.trim()
-                ? profile.name.trim()
-                : firebaseUser.email,
-              role: profile.role
-            });
-
-            setActiveTab(profile.role === "ATENDENTE" ? "pdv" : "dashboard");
-            setAuthError("");
-            setAuthLoading(false);
-          } catch (error) {
-            console.error("Falha ao carregar perfil:", error);
-            setAuthError("Não foi possível validar o perfil. Tente novamente.");
-            setCurrentUser(null);
-            setAuthLoading(false);
-          }
+          } catch (e) { setCurrentUser(null); }
+          setAuthReady(true);
         });
       }, []);
 
+      // Limpa o modo de impressão quando o diálogo fecha
       useEffect(() => {
-        if (!currentUser || !db) {
-          setOrders([]);
-          setIsDbConnected(false);
-          setOrdersLoading(false);
-          return undefined;
-        }
-
-        setOrdersLoading(true);
-
-        const unsubscribe = db.collection("orders")
-          .orderBy("createdAt", "desc")
-          .onSnapshot(
-            snapshot => {
-              setOrders(snapshot.docs.map(document => ({
-                ...document.data(),
-                docId: document.id
-              })));
-              setIsDbConnected(true);
-              setOrdersLoading(false);
-            },
-            error => {
-              console.error("Erro ao carregar comandas:", error);
-              setIsDbConnected(false);
-              setOrdersLoading(false);
-              window.alert("Não foi possível carregar as comandas do Firestore.");
-            }
-          );
-
-        return () => unsubscribe();
-      }, [currentUser]);
-
-      useEffect(() => {
-        if (window.lucide) window.lucide.createIcons();
-      }, [activeTab, currentUser, cart, orders, flavorModalItem]);
-
-      useEffect(() => {
-        const afterPrint = () => {
-          document.body.classList.remove("print-ticket", "print-report");
+        const clean = () => {
+          document.body.classList.remove('print-ticket', 'print-report');
           setPrintingOrder(null);
         };
-
-        window.addEventListener("afterprint", afterPrint);
-        return () => window.removeEventListener("afterprint", afterPrint);
+        window.addEventListener('afterprint', clean);
+        return () => window.removeEventListener('afterprint', clean);
       }, []);
 
-      const cartTotal = useMemo(
-        () => cart.reduce((total, item) => total + item.price * item.quantity, 0),
-        [cart]
-      );
-
-      const cashReport = useMemo(() => {
-        const today = localDateKey();
-        const todayOrders = orders.filter(order =>
-          getOrderBusinessDate(order) === today && order.paymentStatus === "Pago"
-        );
-
-        const report = {
-          today,
-          todayOrders,
-          totalOrders: todayOrders.length,
-          totalRevenue: 0,
-          pastelCount: 0,
-          pastelRevenue: 0,
-          beverageCount: 0,
-          beverageRevenue: 0,
-          payments: { PIX: 0, Dinheiro: 0, "Cartão": 0 }
-        };
-
-        todayOrders.forEach(order => {
-          const total = Number(order.total) || 0;
-          report.totalRevenue += total;
-
-          if (Object.prototype.hasOwnProperty.call(report.payments, order.paymentMethod)) {
-            report.payments[order.paymentMethod] += total;
-          }
-
-          safeItems(order.items).forEach(item => {
-            const quantity = Number(item.quantity) || 0;
-            const price = Number(item.price) || 0;
-            const category = typeof item.category === "string" ? item.category : "";
-            const itemTotal = price * quantity;
-
-            if (category.includes("Pastéis")) {
-              report.pastelCount += quantity;
-              report.pastelRevenue += itemTotal;
-            } else if (category.includes("Caldo") || category.includes("Bebidas")) {
-              report.beverageCount += quantity;
-              report.beverageRevenue += itemTotal;
+      // CONEXÃO FIRESTORE
+      useEffect(() => {
+        if (db && currentUser) {
+          const unsubscribe = db.collection('orders').orderBy('createdAt', 'desc').limit(300).onSnapshot(
+            { includeMetadataChanges: true },
+            snapshot => {
+              const fetched = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+              setOrders(fetched);
+              setIsDbConnected(!snapshot.metadata.fromCache);
+            },
+            err => {
+              console.warn("Aviso Firestore:", err);
+              if (err.code === "permission-denied") notify("Sem permissão para ler os pedidos.", "err");
+              setIsDbConnected(false);
             }
-          });
-        });
-
-        return report;
-      }, [orders]);
-
-      const handleLogin = async (username, password) => {
-        if (!auth || !db) {
-          setAuthError("O serviço de autenticação está indisponível.");
-          return;
+          );
+          return () => unsubscribe();
+        } else {
+          setIsDbConnected(false);
         }
+      }, [currentUser]);
 
-        const normalizedUsername = username.trim();
-        const normalizedPassword = password;
+      const handleLoginSuccess = (userData) => {
+        setCurrentUser(userData);
+        setActiveTab(MANAGER_ROLES.includes(String(userData.role).toUpperCase()) ? 'dashboard' : 'pdv');
+      };
 
-        if (!normalizedUsername || !normalizedPassword) {
-          setAuthError("Informe usuário e senha.");
-          return;
-        }
+      const handleLogout = () => {
+        if (auth) auth.signOut();
+        setCurrentUser(null);
+        setCart([]);
+        setOrders([]);
+      };
 
-        const email = normalizedUsername.includes("@")
-          ? normalizedUsername
-          : `${normalizedUsername}@imperiodacana.com`;
-
-        setAuthLoading(true);
-        setAuthError("");
-
-        try {
-          await auth.signInWithEmailAndPassword(email, normalizedPassword);
-        } catch (error) {
-          console.error("Falha na autenticação:", error);
-          setAuthLoading(false);
-
-          if (["auth/user-not-found", "auth/wrong-password", "auth/invalid-credential"].includes(error.code)) {
-            setAuthError("Usuário ou senha incorretos.");
-          } else if (error.code === "auth/too-many-requests") {
-            setAuthError("Muitas tentativas. Aguarde antes de tentar novamente.");
-          } else {
-            setAuthError("Não foi possível autenticar. Verifique a conexão e tente novamente.");
-          }
+      const handleProductClick = (product) => {
+        if (product.hasFlavor) {
+          setFlavorModalItem(product);
+          setSelectedFlavor('Puro');
+        } else {
+          addItemToCart(product, '');
         }
       };
 
-      const handleLogout = async () => {
-        try {
-          await auth.signOut();
-          setCart([]);
-          setAuthError("");
-        } catch (error) {
-          console.error("Falha ao sair:", error);
-          window.alert("Não foi possível encerrar a sessão. Tente novamente.");
-        }
-      };
-
-      const addItemToCart = (product, flavor = "") => {
-        const normalizedFlavor = flavor || "";
-        const uniqueKey = `${product.id}-${normalizedFlavor || "puro"}`;
-        const itemName = normalizedFlavor && normalizedFlavor !== "Puro"
-          ? `${product.name} (${normalizedFlavor})`
-          : product.name;
-
-        setCart(previousCart => {
-          const existing = previousCart.find(item => item.uniqueKey === uniqueKey);
-
+      const addItemToCart = (product, flavor) => {
+        const itemName = flavor && flavor !== 'Puro' ? `${product.name} (${flavor})` : product.name;
+        setCart(prev => {
+          const existing = prev.find(i => i.id === product.id && i.flavor === flavor);
           if (existing) {
-            return previousCart.map(item =>
-              item.uniqueKey === uniqueKey
-                ? { ...item, quantity: item.quantity + 1 }
-                : item
-            );
+            return prev.map(i => i.id === product.id && i.flavor === flavor ? { ...i, quantity: i.quantity + 1 } : i);
           }
-
-          return [...previousCart, {
-            ...product,
-            uniqueKey,
-            nameWithFlavor: itemName,
-            flavor: normalizedFlavor,
-            quantity: 1
-          }];
+          return [...prev, { ...product, uniqueKey: `${product.id}-${flavor || 'puro'}`, nameWithFlavor: itemName, flavor, quantity: 1, obs: '' }];
         });
-
         setFlavorModalItem(null);
       };
 
-      const handleProductClick = product => {
-        if (product.hasFlavor) {
-          setFlavorModalItem(product);
-          setSelectedFlavor("Puro");
-        } else {
-          addItemToCart(product);
-        }
-      };
-
       const updateCartQty = (uniqueKey, delta) => {
-        setCart(previousCart => previousCart
-          .map(item => {
-            if (item.uniqueKey !== uniqueKey) return item;
-            const quantity = item.quantity + delta;
-            return quantity > 0 ? { ...item, quantity } : null;
-          })
-          .filter(Boolean)
-        );
+        setCart(prev => prev.map(item => {
+          if (item.uniqueKey === uniqueKey) {
+            const newQty = item.quantity + delta;
+            return newQty > 0 ? { ...item, quantity: newQty } : null;
+          }
+          return item;
+        }).filter(Boolean));
       };
 
-      const getLegacyHighestOrderNumber = businessDate => {
-        return orders.reduce((highest, order) => {
-          if (getOrderBusinessDate(order) !== businessDate || typeof order.id !== "string") {
-            return highest;
-          }
+      const cartTotal = useMemo(() => Math.round(cart.reduce((acc, i) => acc + (i.price * i.quantity), 0) * 100) / 100, [cart]);
 
-          const match = order.id.match(/^CMD-(\d+)$/);
-          return match ? Math.max(highest, Number(match[1])) : highest;
-        }, 0);
+      // Numeração diária via transação (sem duplicar entre aparelhos)
+      const generateOrderNum = async () => {
+        const ref = db.collection('counters').doc(localDate());
+        const run = db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          const next = (snap.exists ? snap.data().last : 0) + 1;
+          tx.set(ref, { last: next });
+          return next;
+        });
+        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000));
+        try {
+          const n = await Promise.race([run, timeout]);
+          return `CMD-${String(n).padStart(3, '0')}`;
+        } catch (e) {
+          return `CMD-OFF-${Date.now().toString().slice(-5)}`; // sem conexão
+        }
       };
 
       const handleCreateOrder = async () => {
-        if (!currentUser || !db) {
-          window.alert("É necessário estar conectado para lançar um pedido.");
-          return;
-        }
-
-        if (cart.length === 0) {
-          window.alert("Adicione pelo menos um item ao pedido.");
-          return;
-        }
-
-        if (!Number.isFinite(cartTotal) || cartTotal <= 0) {
-          window.alert("O total do pedido é inválido.");
-          return;
-        }
-
-        const businessDate = localDateKey();
-        const initialSequence = getLegacyHighestOrderNumber(businessDate);
-        const orderRef = db.collection("orders").doc();
-        const counterRef = db.collection("dailyCounters").doc(businessDate);
-        const items = cart.map(item => ({
-          id: item.id,
-          name: item.name,
-          nameWithFlavor: item.nameWithFlavor,
-          category: item.category,
-          price: item.price,
-          quantity: item.quantity,
-          flavor: item.flavor || ""
-        }));
-
-        const orderBase = {
-          customer: customerName.trim().slice(0, 100) || "Cliente Balcão",
-          type: orderType,
-          status: "Aguardando",
-          paymentStatus: "Pendente",
-          paymentMethod: null,
-          createdAt: new Date().toISOString(),
-          businessDate,
-          items,
-          total: cartTotal,
-          atendente: currentUser.name,
-          atendenteUid: currentUser.uid
-        };
-
+        if (cart.length === 0) return notify('Adicione pelo menos um item ao pedido.', 'err');
+        if (!db) return notify('Banco de dados indisponível.', 'err');
+        if (saving) return;
+        setSaving(true);
         try {
-          await db.runTransaction(async transaction => {
-            const counterSnapshot = await transaction.get(counterRef);
-            const savedSequence = counterSnapshot.exists
-              ? Number(counterSnapshot.data().lastNumber) || 0
-              : 0;
-
-            const nextSequence = Math.max(savedSequence, initialSequence) + 1;
-
-            transaction.set(counterRef, {
-              date: businessDate,
-              lastNumber: nextSequence,
-              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            transaction.set(orderRef, {
-              ...orderBase,
-              id: `CMD-${String(nextSequence).padStart(3, "0")}`
-            });
-          });
-
+          const id = await generateOrderNum();
+          const order = {
+            id,
+            customer: customerName.trim() || 'Cliente Balcão',
+            type: orderType,
+            status: 'Aguardando',
+            paymentStatus: 'Pendente',
+            paymentMethod: null,
+            createdAt: new Date().toISOString(),
+            items: [...cart],
+            total: cartTotal,
+            atendente: currentUser ? currentUser.name : 'Balcão'
+          };
+          // Não aguardamos o ack do servidor: offline, o Firestore guarda e sincroniza depois
+          db.collection('orders').doc().set(order)
+            .catch(() => notify(`Falha ao gravar ${id}. Refaça o pedido.`, 'err'));
+          notify(isDbConnected ? `Comanda ${id} lançada.` : `Comanda ${id} salva offline; será enviada ao reconectar.`);
           setCart([]);
-          setCustomerName("");
-          window.alert("Pedido lançado com sucesso.");
-        } catch (error) {
-          console.error("Falha ao criar pedido:", error);
-          window.alert("O pedido não foi confirmado no banco. O carrinho foi mantido; verifique a conexão e tente novamente.");
+          setCustomerName('');
+        } finally {
+          setSaving(false);
         }
       };
 
-      const setOrderBusy = (docId, isBusy) => {
-        setBusyOrderIds(previous =>
-          isBusy
-            ? [...new Set([...previous, docId])]
-            : previous.filter(id => id !== docId)
-        );
-      };
-
-      const handlePayOrder = async (order, method) => {
-        if (!db || !order.docId || !PAYMENT_METHODS.includes(method)) {
-          window.alert("Não foi possível validar a comanda ou a forma de pagamento.");
-          return;
-        }
-
-        setOrderBusy(order.docId, true);
-
+      // Pagamento NÃO altera o status de produção (o pedido continua na cozinha até ser entregue)
+      const handlePayOrder = async (orderId, docId, method) => {
+        if (!db || !docId) return notify('Pedido ainda não sincronizado.', 'err');
+        const ref = db.collection('orders').doc(docId);
         try {
-          await db.runTransaction(async transaction => {
-            const orderRef = db.collection("orders").doc(order.docId);
-            const snapshot = await transaction.get(orderRef);
+          await db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            if (snap.data().paymentStatus === 'Pago') throw new Error('already');
+            tx.update(ref, { paymentStatus: 'Pago', paymentMethod: method, closedAt: new Date().toISOString() });
+          });
+          notify(`${orderId} paga em ${method}.`);
+        } catch (e) {
+          notify(e.message === 'already' ? 'Esta comanda já foi paga.' : 'Não foi possível registrar o pagamento. Verifique a conexão.', 'err');
+        }
+      };
 
-            if (!snapshot.exists) throw new Error("A comanda não existe mais.");
+      const updateOrderStatus = (docId, orderId, newStatus) => {
+        if (!db || !docId) return;
+        db.collection('orders').doc(docId).update({ status: newStatus })
+          .catch(() => notify('Falha ao atualizar o status.', 'err'));
+      };
 
-            const latestOrder = snapshot.data();
-            if (latestOrder.paymentStatus === "Pago") {
-              throw new Error("Esta comanda já foi paga por outro usuário.");
-            }
+      const handlePrintTicket = (order) => {
+        document.body.classList.remove('print-report');
+        document.body.classList.add('print-ticket');
+        setPrintingOrder({ ...order });
+      };
 
-            transaction.update(orderRef, {
-              status: "Entregue",
-              paymentStatus: "Pago",
-              paymentMethod: method,
-              closedAt: new Date().toISOString()
+      useEffect(() => {
+        if (!printingOrder) return;
+        const t = setTimeout(() => window.print(), 150);
+        return () => clearTimeout(t);
+      }, [printingOrder]);
+
+      const handlePrintCashReport = () => {
+        document.body.classList.remove('print-ticket');
+        document.body.classList.add('print-report');
+        setTimeout(() => window.print(), 150);
+      };
+
+      const visibleOrders = orders.filter(o => o.paymentStatus !== 'Pago' || orderPaidDate(o) === localDate());
+
+      const cashReport = useMemo(() => {
+        const todayStr = localDate();
+        const todayOrders = orders.filter(o => o.paymentStatus === 'Pago' && orderPaidDate(o) === todayStr);
+
+        let totalRevenue = 0;
+        let pastelCount = 0;
+        let pastelRevenue = 0;
+        let beverageCount = 0;
+        let beverageRevenue = 0;
+        let payments = { PIX: 0, Dinheiro: 0, Cartão: 0 };
+
+        todayOrders.forEach(o => {
+          totalRevenue += o.total || 0;
+          if (o.paymentMethod && payments[o.paymentMethod] !== undefined) {
+            payments[o.paymentMethod] += o.total || 0;
+          }
+
+          if (o.items) {
+            o.items.forEach(item => {
+              const cat = item.category || '';
+              const isPastel = cat.includes('Pastéis');
+              const isBeverage = cat.includes('Caldo') || cat.includes('Bebidas');
+
+              if (isPastel) {
+                pastelCount += item.quantity || 0;
+                pastelRevenue += (item.price || 0) * (item.quantity || 0);
+              } else if (isBeverage) {
+                beverageCount += item.quantity || 0;
+                beverageRevenue += (item.price || 0) * (item.quantity || 0);
+              }
             });
-          });
-        } catch (error) {
-          console.error("Falha ao registrar pagamento:", error);
-          window.alert(error.message || "Não foi possível registrar o pagamento.");
-        } finally {
-          setOrderBusy(order.docId, false);
-        }
-      };
+          }
+        });
 
-      const updateOrderStatus = async (order, nextStatus) => {
-        if (!db || !order.docId || !ORDER_STATUSES.includes(nextStatus)) {
-          window.alert("Não foi possível validar a alteração de status.");
-          return;
-        }
+        return { todayStr, todayOrders, totalOrders: todayOrders.length, totalRevenue, pastelCount, pastelRevenue, beverageCount, beverageRevenue, payments };
+      }, [orders]);
 
-        const expectedNextStatus = {
-          "Aguardando": "Em Fritura",
-          "Em Fritura": "Pronto",
-          "Pronto": "Entregue"
-        };
+      const canSeeCash = !!currentUser && MANAGER_ROLES.includes(String(currentUser.role).toUpperCase());
 
-        if (expectedNextStatus[order.status] !== nextStatus) {
-          window.alert("A etapa da comanda mudou. Atualize a tela e tente novamente.");
-          return;
-        }
-
-        setOrderBusy(order.docId, true);
-
-        try {
-          await db.runTransaction(async transaction => {
-            const orderRef = db.collection("orders").doc(order.docId);
-            const snapshot = await transaction.get(orderRef);
-
-            if (!snapshot.exists) throw new Error("A comanda não existe mais.");
-
-            const latestOrder = snapshot.data();
-            if (latestOrder.status !== order.status) {
-              throw new Error("A etapa da comanda já foi alterada por outro usuário.");
-            }
-
-            transaction.update(orderRef, { status: nextStatus });
-          });
-        } catch (error) {
-          console.error("Falha ao alterar status:", error);
-          window.alert(error.message || "Não foi possível alterar o status da comanda.");
-        } finally {
-          setOrderBusy(order.docId, false);
-        }
-      };
-
-      const printTicket = order => {
-        setPrintingOrder(order);
-        document.body.classList.remove("print-report");
-        document.body.classList.add("print-ticket");
-        window.setTimeout(() => window.print(), 250);
-      };
-
-      const printCashReport = () => {
-        document.body.classList.remove("print-ticket");
-        document.body.classList.add("print-report");
-        window.setTimeout(() => window.print(), 150);
-      };
-
-      const filteredProducts = INITIAL_CATALOG
-        .filter(product => selectedCategory === "Todos" || product.category === selectedCategory)
-        .filter(product => product.name.toLowerCase().includes(searchTerm.trim().toLowerCase()));
-
-      if (authLoading) {
-        return (
-          <div className="min-h-screen flex items-center justify-center bg-imperio-green text-white">
-            <p className="font-bold">Validando acesso...</p>
-          </div>
-        );
+      if (!authReady) {
+        return <div className="min-h-screen bg-imperio-green flex items-center justify-center text-yellow-400 font-black">Carregando...</div>;
       }
 
       if (!currentUser) {
-        return (
-          <LoginScreen
-            error={authError || (firebaseInitError ? "Falha na configuração do Firebase." : "")}
-            onLogin={handleLogin}
-          />
-        );
+        return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
       }
 
-      const canViewDashboard = currentUser.role !== "ATENDENTE";
-
       return (
-        <div className="min-h-screen flex flex-col md:flex-row">
-          <header className="glass-header sticky top-0 z-30 text-white px-4 py-3 shadow-md flex items-center justify-between">
-            <div className="flex items-center gap-3">
+        <>
+        <div id="app-shell" className="min-h-screen flex flex-col md:flex-row pb-safe-nav md:pb-0 bg-slate-100">
+          
+          <header className="glass-header sticky top-0 z-30 text-white px-4 py-3 shadow-md flex items-center justify-between md:hidden">
+            <div className="flex items-center space-x-3">
               <img
                 src={OFFICIAL_HERO_IMG}
-                alt="Logo Império da Cana"
-                className="w-10 h-10 rounded-xl object-cover border-2 border-yellow-400 bg-white"
+                alt="Império Da Cana Logo" onError={hideImg}
+                className="w-10 h-10 rounded-xl object-cover border-2 border-yellow-400 shadow-md bg-white"
               />
               <div>
-                <h1 className="font-extrabold text-yellow-400 text-sm">IMPÉRIO DA CANA</h1>
-                <div className="flex items-center gap-2 text-[10px] text-emerald-100">
-                  <span className={`w-2 h-2 rounded-full ${isDbConnected ? "bg-emerald-300" : "bg-amber-300"}`}></span>
-                  {isDbConnected ? "Nuvem conectada" : "Sem conexão com a nuvem"}
+                <h1 className="font-extrabold text-yellow-400 text-sm tracking-wide leading-tight">IMPÉRIO DA CANA</h1>
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                  <span className="text-[10px] text-emerald-200 font-semibold">{isDbConnected ? 'Nuvem Conectada' : 'Modo Offline'}</span>
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xs bg-emerald-900 px-2.5 py-1 rounded-full font-bold">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs bg-emerald-900/80 px-2.5 py-1 rounded-full font-bold text-yellow-300 border border-emerald-700 uppercase">
                 {currentUser.name}
               </span>
-              <button
-                onClick={handleLogout}
-                aria-label="Sair"
-                className="p-2 bg-red-600 rounded-xl"
-              >
-                <i data-lucide="log-out" className="w-4 h-4"></i>
+              <button onClick={handleLogout} aria-label="Sair" className="p-2 bg-red-600/80 hover:bg-red-600 rounded-xl text-white transition">
+                <Icon name="log-out" className="w-4 h-4" />
               </button>
             </div>
           </header>
 
-          <aside className="hidden md:flex w-64 min-h-screen bg-imperio-green text-white flex-col flex-shrink-0">
-            <div className="p-5 border-b border-emerald-800">
-              <h2 className="font-black text-yellow-400">IMPÉRIO DA CANA</h2>
-              <span className="text-xs text-emerald-200">Gestão Comercial</span>
+          <aside className="hidden md:flex w-64 h-screen sticky top-0 bg-imperio-green text-white flex-col justify-between shadow-xl flex-shrink-0">
+            <div className="p-4 border-b border-emerald-800/80 flex items-center space-x-3">
+              <img
+                src={OFFICIAL_HERO_IMG}
+                alt="Logo" onError={hideImg}
+                className="w-12 h-12 rounded-xl object-cover border-2 border-yellow-400 bg-white"
+              />
+              <div>
+                <h2 className="font-black text-yellow-400 text-sm">IMPÉRIO DA CANA</h2>
+                <span className="text-[10px] text-emerald-200">Desde 2015</span>
+              </div>
             </div>
 
-            <nav className="p-4 space-y-2">
-              {canViewDashboard && (
-                <NavButton
-                  icon="layout-dashboard"
-                  label="Caixa Diário"
-                  active={activeTab === "dashboard"}
-                  onClick={() => setActiveTab("dashboard")}
-                />
+            <nav className="p-4 space-y-2 flex-1">
+              {canSeeCash && (
+                <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition ${activeTab === 'dashboard' ? 'bg-yellow-400 text-green-950 shadow-lg' : 'hover:bg-emerald-800 text-emerald-100'}`}>
+                  <Icon name="layout-dashboard" className="w-5 h-5" />
+                  <span>Caixa Diário</span>
+                </button>
               )}
-              <NavButton
-                icon="shopping-bag"
-                label="Novo Pedido"
-                active={activeTab === "pdv"}
-                onClick={() => setActiveTab("pdv")}
-              />
-              <NavButton
-                icon="receipt"
-                label="Comandas & Receber"
-                active={activeTab === "comandas"}
-                onClick={() => setActiveTab("comandas")}
-              />
-              <NavButton
-                icon="utensils"
-                label="Cozinha"
-                active={activeTab === "kds"}
-                onClick={() => setActiveTab("kds")}
-              />
+
+              <button onClick={() => setActiveTab('pdv')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition ${activeTab === 'pdv' ? 'bg-yellow-400 text-green-950 shadow-lg' : 'hover:bg-emerald-800 text-emerald-100'}`}>
+                <Icon name="shopping-bag" className="w-5 h-5" />
+                <span>Novo Pedido</span>
+              </button>
+
+              <button onClick={() => setActiveTab('comandas')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition ${activeTab === 'comandas' ? 'bg-yellow-400 text-green-950 shadow-lg' : 'hover:bg-emerald-800 text-emerald-100'}`}>
+                <Icon name="receipt" className="w-5 h-5" />
+                <span>Comandas & Receber</span>
+              </button>
+
+              <button onClick={() => setActiveTab('kds')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition ${activeTab === 'kds' ? 'bg-yellow-400 text-green-950 shadow-lg' : 'hover:bg-emerald-800 text-emerald-100'}`}>
+                <Icon name="utensils" className="w-5 h-5" />
+                <span>Cozinha</span>
+              </button>
             </nav>
+          <div className="p-4 border-t border-emerald-800/80 space-y-3">
+              <div className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                <span className="text-[10px] text-emerald-200 font-semibold">{isDbConnected ? 'Nuvem Conectada' : 'Modo Offline'}</span>
+              </div>
+              <div className="text-xs font-bold text-yellow-300 uppercase truncate">{currentUser.name}</div>
+              <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 py-2.5 bg-red-600/80 hover:bg-red-600 rounded-xl text-white text-xs font-bold transition">
+                <Icon name="log-out" className="w-4 h-4" /> Sair
+              </button>
+            </div>
           </aside>
 
-          <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 md:pb-6 fade-in">
-            {activeTab === "dashboard" && canViewDashboard && (
-              <Dashboard report={cashReport} onPrint={printCashReport} />
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6 fade-in">
+
+            {activeTab === 'dashboard' && canSeeCash && (
+              <div className="space-y-5">
+                <div className="bg-gradient-to-br from-emerald-900 via-imperio-green to-emerald-950 text-white p-6 rounded-3xl shadow-xl border border-emerald-700/50">
+                  <div className="flex justify-between items-center pb-4 border-b border-emerald-700/60">
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider bg-yellow-400 text-emerald-950 px-3 py-1 rounded-full">
+                        Fechamento de Hoje ({new Date().toLocaleDateString('pt-BR')})
+                      </span>
+                      <h2 className="text-2xl font-black text-white mt-2">Balanço de Vendas</h2>
+                    </div>
+                    <button onClick={handlePrintCashReport} className="p-3 bg-yellow-400 text-emerald-950 rounded-2xl font-extrabold text-xs shadow-lg hover:bg-yellow-300 transition flex items-center gap-1.5">
+                      <Icon name="printer" className="w-4 h-4" /> Imprimir Relatório
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+                    <div className="bg-emerald-950/60 p-4 rounded-2xl border border-emerald-700/40">
+                      <span className="text-xs text-emerald-300 font-semibold block">Total Geral</span>
+                      <p className="text-2xl font-black text-yellow-400">R$ {cashReport.totalRevenue.toFixed(2)}</p>
+                      <span className="text-[10px] text-emerald-200 mt-1 block">{cashReport.totalOrders} comandas liquidadas</span>
+                    </div>
+
+                    <div className="bg-emerald-950/60 p-4 rounded-2xl border border-emerald-700/40">
+                      <span className="text-xs text-emerald-300 font-semibold block">Pastéis Vendidos</span>
+                      <p className="text-2xl font-black text-white">{cashReport.pastelCount} <span className="text-xs font-normal text-emerald-300">unid.</span></p>
+                      <span className="text-xs font-bold text-yellow-400 block mt-1">R$ {cashReport.pastelRevenue.toFixed(2)}</span>
+                    </div>
+
+                    <div className="bg-emerald-950/60 p-4 rounded-2xl border border-emerald-700/40">
+                      <span className="text-xs text-emerald-300 font-semibold block">Bebidas & Caldo</span>
+                      <p className="text-2xl font-black text-white">{cashReport.beverageCount} <span className="text-xs font-normal text-emerald-300">unid.</span></p>
+                      <span className="text-xs font-bold text-yellow-400 block mt-1">R$ {cashReport.beverageRevenue.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 pt-4 border-t border-emerald-700/60 grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-emerald-950/80 p-2.5 rounded-xl border border-emerald-800">
+                      <span className="text-[10px] text-emerald-300 font-bold block">PIX</span>
+                      <strong className="text-sm text-yellow-400 font-black">R$ {cashReport.payments.PIX.toFixed(2)}</strong>
+                    </div>
+                    <div className="bg-emerald-950/80 p-2.5 rounded-xl border border-emerald-800">
+                      <span className="text-[10px] text-emerald-300 font-bold block">DINHEIRO</span>
+                      <strong className="text-sm text-yellow-400 font-black">R$ {cashReport.payments.Dinheiro.toFixed(2)}</strong>
+                    </div>
+                    <div className="bg-emerald-950/80 p-2.5 rounded-xl border border-emerald-800">
+                      <span className="text-[10px] text-emerald-300 font-bold block">CARTÃO</span>
+                      <strong className="text-sm text-yellow-400 font-black">R$ {cashReport.payments.Cartão.toFixed(2)}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
-            {activeTab === "pdv" && (
-              <section className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {activeTab === 'pdv' && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                 <div className="lg:col-span-2 space-y-4">
-                  <div className="bg-white p-4 rounded-3xl border space-y-3">
-                    <input
-                      type="search"
-                      aria-label="Buscar produto"
-                      placeholder="Buscar produto..."
-                      value={searchTerm}
-                      onChange={event => setSearchTerm(event.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 border rounded-2xl text-sm"
-                    />
+                  <div className="bg-white p-3.5 rounded-3xl shadow-sm border border-slate-200 space-y-3">
+                    <div className="relative">
+                      <Icon name="search" className="w-5 h-5 absolute left-3.5 top-3 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Buscar pastel, caldo de cana..."
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 font-medium"
+                      />
+                    </div>
 
-                    <div className="flex gap-2 overflow-x-auto">
-                      {["Todos", "Pastéis Salgados", "Caldo de Cana", "Bebidas"].map(category => (
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {['Todos', 'Pastéis Salgados', 'Caldo de Cana', 'Bebidas'].map(cat => (
                         <button
-                          key={category}
-                          onClick={() => setSelectedCategory(category)}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap ${
-                            selectedCategory === category
-                              ? "bg-imperio-green text-yellow-300"
-                              : "bg-slate-100 text-slate-700"
-                          }`}
+                          key={cat}
+                          onClick={() => setSelectedCategory(cat)}
+                          className={`px-4 py-2 rounded-2xl text-xs font-extrabold whitespace-nowrap transition ${selectedCategory === cat ? 'bg-imperio-green text-yellow-400 shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                         >
-                          {category}
+                          {cat}
                         </button>
                       ))}
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {filteredProducts.map(product => (
-                      <button
-                        type="button"
-                        key={product.id}
-                        onClick={() => handleProductClick(product)}
-                        className="text-left bg-white p-4 rounded-3xl border hover:border-emerald-700 flex items-center justify-between"
-                      >
-                        <span>
-                          <span className="block text-[10px] uppercase font-bold text-emerald-800">{product.category}</span>
-                          <strong className="block mt-1 text-sm">{product.name}</strong>
-                          <span className="block text-xs text-slate-500">{product.desc}</span>
-                          <strong className="block mt-2 text-emerald-800">{formatCurrency(product.price)}</strong>
-                        </span>
-                        <span className="w-10 h-10 rounded-xl bg-yellow-400 grid place-items-center font-black">+</span>
-                      </button>
-                    ))}
-                    {filteredProducts.length === 0 && (
-                      <p className="col-span-full text-center p-8 text-slate-500">Nenhum produto encontrado.</p>
-                    )}
+                    {INITIAL_CATALOG
+                      .filter(p => selectedCategory === 'Todos' || p.category === selectedCategory)
+                      .filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(product => (
+                        <div
+                          key={product.id}
+                          onClick={() => handleProductClick(product)}
+                          className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200/80 hover:border-emerald-600 transition cursor-pointer flex justify-between items-center group active:scale-95"
+                        >
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full">
+                              {product.category}
+                            </span>
+                            <h4 className="font-extrabold text-slate-800 text-sm group-hover:text-emerald-900">{product.name}</h4>
+                            <p className="text-xs text-slate-500 line-clamp-1">{product.desc}</p>
+                            <span className="text-base font-black text-emerald-800 block pt-1">
+                              R$ {product.price.toFixed(2)}
+                            </span>
+                          </div>
+                          <button className="w-10 h-10 rounded-2xl bg-yellow-400 text-emerald-950 flex items-center justify-center font-black shadow-md group-hover:bg-emerald-700 group-hover:text-yellow-400 transition">
+                            +
+                          </button>
+                        </div>
+                      ))}
                   </div>
                 </div>
 
-                <section className="bg-white p-5 rounded-3xl border h-fit space-y-4">
-                  <h2 className="font-black text-lg">Carrinho</h2>
+                <div className="bg-white p-5 rounded-3xl shadow-md border border-slate-200 flex flex-col justify-between h-fit space-y-4">
+                  <div>
+                    <div className="flex justify-between items-center border-b pb-3">
+                      <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+                        <Icon name="shopping-cart" className="w-5 h-5 text-emerald-700" />
+                        <span>Carrinho Atual</span>
+                      </h3>
+                      <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
+                        {cart.length} itens
+                      </span>
+                    </div>
 
-                  <label className="block text-xs font-bold">
-                    Cliente / comanda
-                    <input
-                      value={customerName}
-                      onChange={event => setCustomerName(event.target.value)}
-                      maxLength={100}
-                      placeholder="Ex.: João / Mesa 02"
-                      className="mt-1 w-full px-3 py-2.5 bg-slate-50 border rounded-xl text-sm"
-                    />
-                  </label>
-
-                  <label className="block text-xs font-bold">
-                    Local
-                    <select
-                      value={orderType}
-                      onChange={event => setOrderType(event.target.value)}
-                      className="mt-1 w-full px-3 py-2.5 bg-slate-50 border rounded-xl text-sm"
-                    >
-                      <option value="Balcão">Balcão (Viagem)</option>
-                      <option value="Mesa 01">Mesa 01</option>
-                      <option value="Mesa 02">Mesa 02</option>
-                      <option value="Mesa 03">Mesa 03</option>
-                      <option value="Mesa 04">Mesa 04</option>
-                    </select>
-                  </label>
-
-                  <div className="space-y-2 max-h-72 overflow-y-auto">
-                    {cart.length === 0 && (
-                      <p className="py-6 text-center text-xs text-slate-500">O carrinho está vazio.</p>
-                    )}
-                    {cart.map(item => (
-                      <div key={item.uniqueKey} className="p-3 bg-slate-50 rounded-xl border">
-                        <div className="flex justify-between gap-2 text-xs font-bold">
-                          <span>{item.nameWithFlavor}</span>
-                          <span>{formatCurrency(item.price * item.quantity)}</span>
-                        </div>
-                        <div className="mt-2 flex items-center gap-3">
-                          <button onClick={() => updateCartQty(item.uniqueKey, -1)} className="w-7 h-7 bg-slate-200 rounded-lg">-</button>
-                          <span className="text-sm font-bold">{item.quantity}</span>
-                          <button onClick={() => updateCartQty(item.uniqueKey, 1)} className="w-7 h-7 bg-slate-200 rounded-lg">+</button>
-                        </div>
+                    <div className="space-y-3 mt-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-600 block mb-1">Nome do Cliente / Comanda</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: João / Mesa 02"
+                          value={customerName}
+                          onChange={e => setCustomerName(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-600"
+                        />
                       </div>
-                    ))}
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-600 block mb-1">Local / Tipo</label>
+                        <select
+                          value={orderType}
+                          onChange={e => setOrderType(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-700"
+                        >
+                          <option value="Balcão">Balcão (Viagem)</option>
+                          <option value="Mesa 01">Mesa 01</option>
+                          <option value="Mesa 02">Mesa 02</option>
+                          <option value="Mesa 03">Mesa 03</option>
+                          <option value="Mesa 04">Mesa 04</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-2.5 max-h-56 overflow-y-auto pr-1">
+                      {cart.length === 0 ? (
+                        <div className="text-center py-8 text-slate-400 text-xs font-semibold">
+                          Selecione os pastéis e caldos do menu ao lado.
+                        </div>
+                      ) : (
+                        cart.map(item => (
+                          <div key={item.uniqueKey} className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-2">
+                            <div className="flex justify-between items-start font-extrabold text-slate-800">
+                              <span>{item.nameWithFlavor}</span>
+                              <span className="text-emerald-800">R$ {(item.price * item.quantity).toFixed(2)}</span>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                              <div className="flex items-center space-x-2">
+                                <button onClick={() => updateCartQty(item.uniqueKey, -1)} className="w-7 h-7 bg-slate-200 text-slate-800 font-black rounded-xl">-</button>
+                                <span className="font-extrabold text-sm px-1">{item.quantity}</span>
+                                <button onClick={() => updateCartQty(item.uniqueKey, 1)} className="w-7 h-7 bg-slate-200 text-slate-800 font-black rounded-xl">+</button>
+                              </div>
+                              <span className="text-[10px] text-slate-400 font-semibold">R$ {item.price.toFixed(2)} un.</span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
 
-                  <div className="border-t pt-3 flex justify-between font-black">
-                    <span>Total</span>
-                    <span className="text-emerald-800">{formatCurrency(cartTotal)}</span>
-                  </div>
+                  <div className="pt-3 border-t space-y-3">
+                    <div className="flex justify-between items-center text-lg font-black text-slate-900">
+                      <span>Total:</span>
+                      <span className="text-xl text-emerald-800">R$ {cartTotal.toFixed(2)}</span>
+                    </div>
 
-                  <button
-                    disabled={cart.length === 0}
-                    onClick={handleCreateOrder}
-                    className="w-full py-3 bg-imperio-green text-yellow-300 font-black rounded-xl disabled:opacity-50"
-                  >
-                    Lançar pedido
-                  </button>
-                </section>
-              </section>
+                    <button
+                      onClick={handleCreateOrder} disabled={saving}
+                      className="w-full py-3.5 bg-imperio-green hover:bg-emerald-900 text-yellow-400 font-black rounded-2xl text-sm shadow-xl transition flex items-center justify-center gap-2 active:scale-[0.98]"
+                    >
+                      <Icon name="circle-check" className="w-5 h-5" />
+                      Lançar Pedido
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
 
-            {activeTab === "comandas" && (
-              <section className="space-y-4">
-                <div className="bg-white p-4 rounded-2xl border flex justify-between items-center">
+            {activeTab === 'comandas' && (
+              <div className="space-y-4">
+                <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex justify-between items-center">
                   <div>
-                    <h2 className="font-bold">Comandas</h2>
-                    <p className="text-xs text-slate-500">
-                      {ordersLoading ? "Carregando..." : "Pedidos registrados no sistema"}
-                    </p>
+                    <h3 className="font-extrabold text-slate-800 text-sm">Comandas do Dia</h3>
+                    <p className="text-xs text-slate-500">Selecione uma comanda aberta para receber o pagamento</p>
                   </div>
-                  <span className="text-xs font-bold bg-yellow-300 px-3 py-1 rounded-full">
-                    {orders.filter(order => order.paymentStatus !== "Pago").length} abertas
+                  <span className="text-xs font-black bg-yellow-400 text-emerald-950 px-3 py-1 rounded-full shadow-sm">
+                    {orders.filter(o => o.paymentStatus !== 'Pago').length} Abertas
                   </span>
                 </div>
 
-                {!ordersLoading && orders.length === 0 && (
-                  <div className="p-10 bg-white rounded-2xl text-center text-slate-500">
-                    Nenhuma comanda encontrada.
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {orders.map(order => {
-                    const isPaid = order.paymentStatus === "Pago";
-                    const isBusy = busyOrderIds.includes(order.docId);
-
-                    return (
-                      <article
-                        key={order.docId}
-                        className={`bg-white rounded-2xl p-4 border ${isPaid ? "border-emerald-300" : "border-yellow-400"}`}
-                      >
-                        <div className="flex justify-between gap-3 border-b pb-2">
-                          <div>
-                            <strong className="text-emerald-900">{order.id || "Comanda"}</strong>
-                            <p className="text-xs">{order.customer || "Cliente"} · {order.type || "Balcão"}</p>
-                            <p className="text-[10px] text-slate-500">{formatOrderDate(order.createdAt)}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {visibleOrders.length === 0 ? (
+                    <div className="col-span-full text-center py-12 text-slate-400 text-sm bg-white rounded-3xl border border-slate-200 font-semibold">
+                      Nenhuma comanda lançada no momento.
+                    </div>
+                  ) : (
+                    visibleOrders.map(order => (
+                      <div key={order.docId || order.id} className={`bg-white rounded-3xl shadow-sm border p-4 flex flex-col justify-between ${order.paymentStatus === 'Pago' ? 'border-emerald-300 bg-emerald-50/20' : 'border-yellow-400'}`}>
+                        <div>
+                          <div className="flex justify-between items-start font-bold text-xs border-b pb-2">
+                            <div>
+                              <span className="text-emerald-900 font-black text-sm">{order.id}</span>
+                              <span className="block font-bold text-slate-700">{order.customer} ({order.type})</span>
+                            </div>
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold ${order.paymentStatus === 'Pago' ? 'bg-emerald-100 text-emerald-800' : 'bg-yellow-100 text-yellow-900'}`}>
+                              {order.paymentStatus === 'Pago' ? 'Pago' : 'Em Aberto'}
+                            </span>
                           </div>
-                          <span className="text-xs font-bold">{isPaid ? "Paga" : "Em aberto"}</span>
-                        </div>
 
-                        <ul className="py-3 space-y-1 text-xs">
-                          {safeItems(order.items).map((item, index) => (
-                            <li key={`${item.id || item.name}-${index}`} className="flex justify-between gap-2">
-                              <span>{Number(item.quantity) || 0} × {item.nameWithFlavor || item.name || "Item"}</span>
-                              <span>{formatCurrency((Number(item.price) || 0) * (Number(item.quantity) || 0))}</span>
-                            </li>
-                          ))}
-                        </ul>
-
-                        <div className="border-t pt-3 flex justify-between font-black">
-                          <span>Total</span>
-                          <span>{formatCurrency(order.total)}</span>
-                        </div>
-
-                        {!isPaid ? (
-                          <div className="grid grid-cols-3 gap-2 mt-3">
-                            {PAYMENT_METHODS.map(method => (
-                              <button
-                                key={method}
-                                disabled={isBusy}
-                                onClick={() => handlePayOrder(order, method)}
-                                className="py-2 px-1 bg-emerald-700 text-white rounded-lg text-xs font-bold disabled:opacity-50"
-                              >
-                                {method}
-                              </button>
+                          <ul className="text-xs space-y-1.5 my-3">
+                            {order.items && order.items.map((it, idx) => (
+                              <li key={idx} className="flex justify-between text-slate-700 font-medium">
+                                <span>{it.quantity}x {it.nameWithFlavor || it.name}</span>
+                                <span className="font-bold">R$ {(it.price * it.quantity).toFixed(2)}</span>
+                              </li>
                             ))}
+                          </ul>
+                        </div>
+
+                        <div className="pt-3 border-t space-y-2">
+                          <div className="flex justify-between items-center font-black text-sm text-slate-900">
+                            <span>Total Comanda:</span>
+                            <span className="text-base text-emerald-800">R$ {order.total ? order.total.toFixed(2) : '0.00'}</span>
                           </div>
-                        ) : (
-                          <div className="flex justify-between items-center mt-3 text-xs">
-                            <span>Pago em {order.paymentMethod || "—"}</span>
-                            <button
-                              onClick={() => printTicket(order)}
-                              className="px-3 py-2 bg-slate-200 rounded-lg font-bold"
-                            >
-                              Imprimir cupom
-                            </button>
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })}
+
+                          {order.paymentStatus !== 'Pago' ? (
+                            <div className="grid grid-cols-3 gap-1.5 pt-1">
+                              <button onClick={() => handlePayOrder(order.id, order.docId, 'PIX')} className="py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold rounded-xl text-xs shadow-sm">PIX</button>
+                              <button onClick={() => handlePayOrder(order.id, order.docId, 'Dinheiro')} className="py-2.5 bg-yellow-400 hover:bg-yellow-500 text-emerald-950 font-extrabold rounded-xl text-xs shadow-sm">Dinheiro</button>
+                              <button onClick={() => handlePayOrder(order.id, order.docId, 'Cartão')} className="py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-extrabold rounded-xl text-xs shadow-sm">Cartão</button>
+                            </div>
+                          ) : (
+                            <div className="flex justify-between items-center text-xs text-slate-500 pt-1">
+                              <span>Pago em <strong>{order.paymentMethod}</strong></span>
+                              <button onClick={() => handlePrintTicket(order)} className="px-3 py-1 bg-slate-200 text-slate-800 rounded-lg font-bold">Imprimir Cupom</button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
-              </section>
+              </div>
             )}
 
-            {activeTab === "kds" && (
-              <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {["Aguardando", "Em Fritura", "Pronto"].map(status => {
-                  const statusOrders = orders.filter(order => order.status === status);
+            {activeTab === 'kds' && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {['Aguardando', 'Em Fritura', 'Pronto'].map(status => {
+                  const statusOrders = orders.filter(o => o.status === status).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+                  const statusColor = status === 'Aguardando' ? 'border-yellow-500 bg-yellow-50/50' : status === 'Em Fritura' ? 'border-orange-500 bg-orange-50/50' : 'border-emerald-500 bg-emerald-50/50';
 
                   return (
-                    <div key={status} className="bg-white rounded-2xl border p-4">
-                      <h2 className="font-black border-b pb-2 mb-3">
-                        {status} <span className="text-slate-500">({statusOrders.length})</span>
-                      </h2>
+                    <div key={status} className="bg-white rounded-3xl shadow-sm border border-slate-200 p-4 flex flex-col">
+                      <div className={`border-b-2 pb-2 mb-3 flex justify-between items-center ${statusColor}`}>
+                        <h3 className="font-extrabold text-slate-800 text-sm">{status}</h3>
+                        <span className="text-xs font-black bg-slate-200 px-2.5 py-0.5 rounded-full">{statusOrders.length}</span>
+                      </div>
 
-                      <div className="space-y-3">
-                        {statusOrders.map(order => {
-                          const nextStatus = {
-                            "Aguardando": "Em Fritura",
-                            "Em Fritura": "Pronto",
-                            "Pronto": "Entregue"
-                          }[status];
+                      <div className="space-y-3 flex-1 overflow-y-auto">
+                        {statusOrders.length === 0 ? (
+                          <p className="text-center text-slate-400 text-xs py-6 font-semibold">Fila limpa nesta etapa.</p>
+                        ) : (
+                          statusOrders.map(order => (
+                            <div key={order.docId || order.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                              <div className="flex justify-between items-start font-bold text-xs text-slate-900">
+                                <span>{order.id} - {order.customer}</span>
+                                <span className="text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full font-extrabold">{order.type}</span>
+                              </div>
 
-                          return (
-                            <article key={order.docId} className="p-3 bg-slate-50 rounded-xl border">
-                              <strong className="text-sm">{order.id} · {order.customer}</strong>
-                              <p className="text-xs text-slate-500">{order.type}</p>
-                              <ul className="py-2 text-xs">
-                                {safeItems(order.items).map((item, index) => (
-                                  <li key={`${item.id || item.name}-${index}`}>
-                                    {Number(item.quantity) || 0} × {item.nameWithFlavor || item.name || "Item"}
+                              <ul className="text-xs space-y-1 my-2 border-t border-b py-2">
+                                {order.items && order.items.map((it, idx) => (
+                                  <li key={idx} className="flex flex-col text-slate-800">
+                                    <span className="font-bold">{it.quantity}x {it.nameWithFlavor || it.name}</span>
                                   </li>
                                 ))}
                               </ul>
-                              <button
-                                disabled={busyOrderIds.includes(order.docId)}
-                                onClick={() => updateOrderStatus(order, nextStatus)}
-                                className="w-full py-2 bg-imperio-green text-white rounded-lg text-xs font-bold disabled:opacity-50"
-                              >
-                                {nextStatus === "Entregue" ? "Marcar entregue" : `Avançar para ${nextStatus}`}
-                              </button>
-                            </article>
-                          );
-                        })}
-                        {statusOrders.length === 0 && (
-                          <p className="py-5 text-center text-xs text-slate-500">Nenhuma comanda nesta etapa.</p>
+
+                              <div className="pt-1">
+                                {status === 'Aguardando' && (
+                                  <button onClick={() => updateOrderStatus(order.docId, order.id, 'Em Fritura')} className="w-full py-2 bg-orange-500 text-white font-extrabold rounded-xl text-xs hover:bg-orange-600 shadow-sm">
+                                    Iniciar Fritura
+                                  </button>
+                                )}
+                                {status === 'Em Fritura' && (
+                                  <button onClick={() => updateOrderStatus(order.docId, order.id, 'Pronto')} className="w-full py-2 bg-emerald-600 text-white font-extrabold rounded-xl text-xs hover:bg-emerald-700 shadow-sm">
+                                    Marcar Pronto
+                                  </button>
+                                )}
+                                {status === 'Pronto' && (
+                                  <button onClick={() => updateOrderStatus(order.docId, order.id, 'Entregue')} className="w-full py-2 bg-slate-800 text-white font-extrabold rounded-xl text-xs hover:bg-slate-900 shadow-sm">
+                                    Entregue
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))
                         )}
                       </div>
                     </div>
                   );
                 })}
-              </section>
+              </div>
             )}
+
           </main>
 
-          <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass-header px-2 py-2 flex justify-around text-white">
-            {canViewDashboard && (
-              <MobileNavButton
-                icon="layout-dashboard"
-                label="Caixa"
-                active={activeTab === "dashboard"}
-                onClick={() => setActiveTab("dashboard")}
-              />
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 glass-header border-t border-emerald-800/80 px-2 py-2 flex justify-around items-center z-40">
+            {canSeeCash && (
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`flex flex-col items-center py-1 px-3 rounded-2xl transition ${activeTab === 'dashboard' ? 'text-yellow-400 font-bold' : 'text-emerald-200'}`}
+              >
+                <Icon name="layout-dashboard" className="w-5 h-5" />
+                <span className="text-[10px] mt-0.5">Caixa</span>
+              </button>
             )}
-            <MobileNavButton
-              icon="shopping-bag"
-              label="Pedido"
-              active={activeTab === "pdv"}
-              onClick={() => setActiveTab("pdv")}
-            />
-            <MobileNavButton
-              icon="receipt"
-              label="Comandas"
-              active={activeTab === "comandas"}
-              onClick={() => setActiveTab("comandas")}
-            />
-            <MobileNavButton
-              icon="utensils"
-              label="Cozinha"
-              active={activeTab === "kds"}
-              onClick={() => setActiveTab("kds")}
-            />
+
+            <button
+              onClick={() => setActiveTab('pdv')}
+              className={`flex flex-col items-center py-1 px-3 rounded-2xl transition ${activeTab === 'pdv' ? 'text-yellow-400 font-bold' : 'text-emerald-200'}`}
+            >
+              <Icon name="shopping-bag" className="w-5 h-5" />
+              <span className="text-[10px] mt-0.5">Pedido</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('comandas')}
+              className={`flex flex-col items-center py-1 px-3 rounded-2xl transition ${activeTab === 'comandas' ? 'text-yellow-400 font-bold' : 'text-emerald-200'}`}
+            >
+              <Icon name="receipt" className="w-5 h-5" />
+              <span className="text-[10px] mt-0.5">Comandas</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('kds')}
+              className={`flex flex-col items-center py-1 px-3 rounded-2xl transition ${activeTab === 'kds' ? 'text-yellow-400 font-bold' : 'text-emerald-200'}`}
+            >
+              <Icon name="utensils" className="w-5 h-5" />
+              <span className="text-[10px] mt-0.5">Cozinha</span>
+            </button>
           </nav>
 
           {flavorModalItem && (
-            <div className="fixed inset-0 z-50 bg-slate-900/70 flex items-center justify-center p-4">
-              <div className="bg-white rounded-3xl p-6 w-full max-w-sm space-y-4">
-                <h2 className="text-center font-black text-lg">Escolha o sabor</h2>
-                <p className="text-center text-xs text-slate-500">{flavorModalItem.name}</p>
+            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl border-2 border-yellow-400 fade-in">
+                <h3 className="font-black text-lg text-emerald-950 text-center">Sabor do Caldo de Cana</h3>
+                <p className="text-xs text-center text-slate-500 font-medium">{flavorModalItem.name}</p>
+
                 <div className="space-y-2">
                   {FLAVORS.map(flavor => (
                     <button
                       key={flavor}
                       onClick={() => setSelectedFlavor(flavor)}
-                      className={`w-full p-3 rounded-xl border text-sm font-bold ${
-                        selectedFlavor === flavor ? "bg-imperio-green text-yellow-300" : "bg-slate-50"
-                      }`}
+                      className={`w-full py-3 px-4 rounded-2xl font-bold text-xs transition border flex justify-between items-center ${selectedFlavor === flavor ? 'bg-imperio-green text-yellow-400 border-emerald-800 shadow-md' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
                     >
-                      {flavor}
+                      <span>{flavor}</span>
+                      {selectedFlavor === flavor && <Icon name="check" className="w-4 h-4" />}
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => setFlavorModalItem(null)} className="p-3 bg-slate-200 rounded-xl font-bold">Cancelar</button>
-                  <button onClick={() => addItemToCart(flavorModalItem, selectedFlavor)} className="p-3 bg-yellow-400 rounded-xl font-black">Confirmar</button>
+
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                  <button onClick={() => setFlavorModalItem(null)} className="py-3 bg-slate-200 text-slate-800 font-bold rounded-2xl text-xs">Cancelar</button>
+                  <button onClick={() => addItemToCart(flavorModalItem, selectedFlavor)} className="py-3 bg-yellow-400 text-emerald-950 font-black rounded-2xl text-xs shadow-md">Confirmar</button>
                 </div>
               </div>
             </div>
           )}
 
+          </div>
+
+          {toast && (
+            <div className={`print:hidden fixed top-4 left-1/2 -translate-x-1/2 z-[60] px-4 py-3 rounded-2xl shadow-xl text-xs font-extrabold ${toast.type === 'err' ? 'bg-red-600 text-white' : 'bg-emerald-700 text-white'}`}>
+              {toast.msg}
+            </div>
+          )}
+
+          {/* ESTRUTURA 1: IMPRESSÃO DA COMANDA INDIVIDUAL (CUPOM) */}
           {printingOrder && (
             <div id="printable-ticket">
-              <div style={{ textAlign: "center" }}>
-                <strong>IMPÉRIO DA CANA</strong>
-                <div>PASTEL E CALDO DE CANA</div>
-                <div>Tel: (14) 99843-8050</div>
-                <hr />
+              <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+                <h2 style={{ fontSize: '16px', fontWeight: 'bold', margin: 0 }}>IMPÉRIO DA CANA</h2>
+                <p style={{ fontSize: '10px', margin: 0 }}>PASTEL E CALDO DE CANA - DESDE 2015</p>
+                <p style={{ fontSize: '10px', margin: 0 }}>Tel: (14) 99843-8050</p>
+                <hr style={{ borderStyle: 'dashed', margin: '5px 0' }} />
               </div>
-              <p><strong>COMANDA: {printingOrder.id}</strong></p>
-              <p>Cliente: {printingOrder.customer}</p>
-              <p>Local: {printingOrder.type}</p>
-              <p>Data: {formatOrderDate(printingOrder.createdAt)}</p>
-              <hr />
-              {safeItems(printingOrder.items).map((item, index) => (
-                <p key={index}>
-                  {item.quantity} × {item.nameWithFlavor || item.name} —{" "}
-                  {formatCurrency((Number(item.price) || 0) * (Number(item.quantity) || 0))}
-                </p>
-              ))}
-              <hr />
-              <strong>TOTAL: {formatCurrency(printingOrder.total)}</strong>
-              <p>Pagamento: {printingOrder.paymentMethod || "Pendente"}</p>
+
+              <div>
+                <p style={{ margin: '2px 0' }}><strong>COMANDA: {printingOrder.id}</strong></p>
+                <p style={{ margin: '2px 0' }}>Cliente: {printingOrder.customer}</p>
+                <p style={{ margin: '2px 0' }}>Local: {printingOrder.type}</p>
+                <p style={{ margin: '2px 0' }}>Data: {new Date(printingOrder.createdAt).toLocaleString('pt-BR')}</p>
+                <hr style={{ borderStyle: 'dashed', margin: '5px 0' }} />
+              </div>
+
+              <div style={{ marginBottom: '10px' }}>
+                <p style={{ fontWeight: 'bold', margin: '3px 0' }}>ITENS:</p>
+                {printingOrder.items && printingOrder.items.map((it, idx) => (
+                  <div key={idx} style={{ marginBottom: '4px' }}>
+                    <div>{it.quantity}x {it.nameWithFlavor || it.name} - R$ {(it.price * it.quantity).toFixed(2)}</div>
+                  </div>
+                ))}
+              </div>
+
+              <hr style={{ borderStyle: 'dashed', margin: '5px 0' }} />
+              <div style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '14px' }}>
+                TOTAL: R$ {printingOrder.total ? printingOrder.total.toFixed(2) : '0.00'}
+              </div>
             </div>
           )}
 
+          {/* ESTRUTURA 2: IMPRESSÃO DO RELATÓRIO DO CAIXA DIÁRIO */}
+          {canSeeCash && (
           <div id="printable-report">
-            <div style={{ textAlign: "center" }}>
-              <h1>IMPÉRIO DA CANA</h1>
-              <h3>RELATÓRIO DE FECHAMENTO DE CAIXA</h3>
-              <p>Data: {new Date().toLocaleDateString("pt-BR")}</p>
-              <hr />
+            <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+              <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>IMPÉRIO DA CANA</h1>
+              <h3 style={{ fontSize: '14px', margin: '5px 0' }}>RELATÓRIO DE FECHAMENTO DE CAIXA</h3>
+              <p style={{ fontSize: '12px', color: '#555', margin: 0 }}>Data do Fechamento: {new Date().toLocaleDateString('pt-BR')}</p>
+              <hr style={{ margin: '10px 0', borderColor: '#ccc' }} />
             </div>
 
-            <h4>RESUMO GERAL</h4>
-            <p>Comandas pagas: <strong>{cashReport.totalOrders}</strong></p>
-            <p>Pastéis vendidos: <strong>{cashReport.pastelCount}</strong> — {formatCurrency(cashReport.pastelRevenue)}</p>
-            <p>Bebidas e caldos: <strong>{cashReport.beverageCount}</strong> — {formatCurrency(cashReport.beverageRevenue)}</p>
-            <h3>FATURAMENTO TOTAL: {formatCurrency(cashReport.totalRevenue)}</h3>
+            <div style={{ marginBottom: '15px' }}>
+              <h4 style={{ margin: '5px 0', fontSize: '14px', borderBottom: '1px solid #000', paddingBottom: '3px' }}>RESUMO GERAL</h4>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>Total de Comandas Liquidadas: <strong>{cashReport.totalOrders}</strong></p>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>Pastéis Vendidos: <strong>{cashReport.pastelCount} unid.</strong> (R$ {cashReport.pastelRevenue.toFixed(2)})</p>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>Bebidas / Caldo: <strong>{cashReport.beverageCount} unid.</strong> (R$ {cashReport.beverageRevenue.toFixed(2)})</p>
+              <p style={{ margin: '6px 0', fontSize: '16px', fontWeight: 'bold' }}>FATURAMENTO TOTAL: R$ {cashReport.totalRevenue.toFixed(2)}</p>
+            </div>
 
-            <h4>FORMAS DE PAGAMENTO</h4>
-            <p>PIX: {formatCurrency(cashReport.payments.PIX)}</p>
-            <p>Dinheiro: {formatCurrency(cashReport.payments.Dinheiro)}</p>
-            <p>Cartão: {formatCurrency(cashReport.payments["Cartão"])}</p>
+            <div style={{ marginBottom: '15px' }}>
+              <h4 style={{ margin: '5px 0', fontSize: '14px', borderBottom: '1px solid #000', paddingBottom: '3px' }}>DETALHAMENTO POR FORMA DE PAGAMENTO</h4>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>• PIX: <strong>R$ {cashReport.payments.PIX.toFixed(2)}</strong></p>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>• DINHEIRO: <strong>R$ {cashReport.payments.Dinheiro.toFixed(2)}</strong></p>
+              <p style={{ margin: '4px 0', fontSize: '12px' }}>• CARTÃO: <strong>R$ {cashReport.payments.Cartão.toFixed(2)}</strong></p>
+            </div>
 
-            <h4>COMANDAS PAGAS</h4>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "left" }}>Comanda</th>
-                  <th style={{ textAlign: "left" }}>Cliente</th>
-                  <th style={{ textAlign: "left" }}>Pagamento</th>
-                  <th style={{ textAlign: "right" }}>Valor</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cashReport.todayOrders.map(order => (
-                  <tr key={order.docId}>
-                    <td>{order.id}</td>
-                    <td>{order.customer}</td>
-                    <td>{order.paymentMethod || "—"}</td>
-                    <td style={{ textAlign: "right" }}>{formatCurrency(order.total)}</td>
+            <div>
+              <h4 style={{ margin: '5px 0', fontSize: '14px', borderBottom: '1px solid #000', paddingBottom: '3px' }}>RELAÇÃO DE COMANDAS DO DIA</h4>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginTop: '5px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #aaa', textAlign: 'left' }}>
+                    <th style={{ padding: '4px' }}>Comanda</th>
+                    <th style={{ padding: '4px' }}>Cliente</th>
+                    <th style={{ padding: '4px' }}>Pagamento</th>
+                    <th style={{ padding: '4px', textAlign: 'right' }}>Valor</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      );
-    }
-
-    function NavButton({ icon, label, active, onClick }) {
-      return (
-        <button
-          onClick={onClick}
-          className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold ${
-            active ? "bg-yellow-400 text-emerald-950" : "text-emerald-100 hover:bg-emerald-800"
-          }`}
-        >
-          <i data-lucide={icon} className="w-5 h-5"></i>
-          {label}
-        </button>
-      );
-    }
-
-    function MobileNavButton({ icon, label, active, onClick }) {
-      return (
-        <button onClick={onClick} className={`flex flex-col items-center px-2 py-1 ${active ? "text-yellow-300" : "text-emerald-100"}`}>
-          <i data-lucide={icon} className="w-5 h-5"></i>
-          <span className="text-[10px]">{label}</span>
-        </button>
-      );
-    }
-
-    function Dashboard({ report, onPrint }) {
-      return (
-        <section className="space-y-5">
-          <div className="bg-gradient-to-br from-emerald-900 to-emerald-950 text-white p-6 rounded-3xl shadow-lg">
-            <div className="flex flex-wrap justify-between items-center gap-3 border-b border-emerald-700 pb-4">
-              <div>
-                <span className="text-xs text-yellow-300 font-bold">
-                  Fechamento de hoje — {new Date().toLocaleDateString("pt-BR")}
-                </span>
-                <h2 className="text-2xl font-black mt-1">Balanço de vendas</h2>
-              </div>
-              <button onClick={onPrint} className="px-4 py-3 bg-yellow-400 text-emerald-950 rounded-xl text-xs font-black">
-                Imprimir relatório
-              </button>
-            </div>
-
-            <div className="grid sm:grid-cols-3 gap-3 mt-5">
-              <Metric label="Faturamento total" value={formatCurrency(report.totalRevenue)} detail={`${report.totalOrders} comandas pagas`} />
-              <Metric label="Pastéis vendidos" value={`${report.pastelCount} un.`} detail={formatCurrency(report.pastelRevenue)} />
-              <Metric label="Bebidas e caldos" value={`${report.beverageCount} un.`} detail={formatCurrency(report.beverageRevenue)} />
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 mt-4 text-center">
-              {PAYMENT_METHODS.map(method => (
-                <div key={method} className="p-3 bg-emerald-950 rounded-xl">
-                  <span className="block text-xs text-emerald-200">{method}</span>
-                  <strong className="text-yellow-300">{formatCurrency(report.payments[method])}</strong>
-                </div>
-              ))}
+                </thead>
+                <tbody>
+                  {cashReport.todayOrders && cashReport.todayOrders.map((o, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '4px' }}>{o.id}</td>
+                      <td style={{ padding: '4px' }}>{o.customer}</td>
+                      <td style={{ padding: '4px' }}>{o.paymentMethod || 'Pendente'}</td>
+                      <td style={{ padding: '4px', textAlign: 'right' }}>R$ {(o.total || 0).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
-        </section>
+          )}
+        </>
       );
     }
 
-    function Metric({ label, value, detail }) {
-      return (
-        <div className="p-4 rounded-2xl bg-emerald-950/70 border border-emerald-800">
-          <span className="text-xs text-emerald-200">{label}</span>
-          <strong className="block text-xl text-yellow-300 mt-1">{value}</strong>
-          <span className="text-xs text-emerald-100">{detail}</span>
-        </div>
-      );
-    }
+    function LoginScreen({ onLoginSuccess }) {
+      const [username, setUsername] = useState('');
+      const [password, setPassword] = useState('');
+      const [error, setError] = useState('');
+      const [loading, setLoading] = useState(false);
 
-    function LoginScreen({ error, onLogin }) {
-      const [username, setUsername] = useState("");
-      const [password, setPassword] = useState("");
-      const [submitting, setSubmitting] = useState(false);
+      const handleLoginSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
 
-      const submit = async event => {
-        event.preventDefault();
-        setSubmitting(true);
-        await onLogin(username, password);
-        setSubmitting(false);
-      };
+        if (!auth || !db) {
+          setError('Sistema indisponível: não foi possível conectar ao Firebase.');
+          setLoading(false);
+          return;
+        }
 
-      const fillAttendantUsername = () => {
-        setUsername("atendente");
-        setPassword("");
+        try {
+          const email = username.includes('@') ? username.trim() : `${username.trim()}@imperiodacana.com`;
+          const cred = await auth.signInWithEmailAndPassword(email, password);
+          const userDoc = await db.collection('usuarios').doc(cred.user.uid).get();
+
+          if (!userDoc.exists) {
+            setError('Perfil não encontrado no sistema.');
+            await auth.signOut();
+          } else if (!userDoc.data().ativo) {
+            setError('Este usuário está inativo no sistema.');
+            await auth.signOut();
+          } else {
+            onLoginSuccess(userDoc.data());
+          }
+        } catch (err) {
+          console.error("Erro no login:", err.code);
+          const bad = ['auth/user-not-found', 'auth/wrong-password', 'auth/invalid-credential', 'auth/invalid-email'];
+          if (bad.includes(err.code)) setError('Usuário ou senha incorretos.');
+          else if (err.code === 'auth/too-many-requests') setError('Muitas tentativas. Aguarde e tente de novo.');
+          else if (err.code === 'auth/network-request-failed') setError('Sem conexão com a internet.');
+          else setError('Erro ao autenticar. Tente novamente.');
+        }
+        setLoading(false);
       };
 
       return (
         <div className="min-h-screen bg-imperio-green flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 space-y-5 border-4 border-yellow-400 fade-in">
-            <div className="text-center">
+          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden max-w-sm w-full border-4 border-yellow-400 p-6 space-y-6 fade-in">
+            <div className="text-center space-y-2">
               <img
                 src={OFFICIAL_HERO_IMG}
-                alt="Logo Império da Cana"
-                className="w-24 h-24 mx-auto rounded-2xl object-cover border-4 border-yellow-400 bg-white"
+                alt="Império Da Cana Logo"
+                onError={hideImg}
+                className="w-24 h-24 mx-auto rounded-2xl object-cover border-4 border-yellow-400 shadow-xl bg-white"
               />
-              <h1 className="mt-3 text-xl font-black text-emerald-950">IMPÉRIO DA CANA</h1>
-              <p className="text-xs text-slate-500">Agudos, SP · (14) 99843-8050</p>
+              <h1 className="text-2xl font-black text-emerald-950 tracking-wide">IMPÉRIO DA CANA</h1>
+              <p className="text-xs font-bold text-slate-500">Agudos, SP • Tel: (14) 99843-8050</p>
             </div>
 
-            <div>
-              <span className="block mb-2 text-[10px] uppercase font-black text-slate-400">Acesso rápido</span>
-              <button
-                type="button"
-                onClick={fillAttendantUsername}
-                className="w-full py-2 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl font-bold text-sm"
-              >
-                Atendente
-              </button>
-            </div>
+            <form onSubmit={handleLoginSubmit} className="space-y-4">
+              {error && (
+                <div role="alert" className="p-3 bg-red-100 text-red-700 text-xs rounded-xl font-bold text-center">
+                  {error}
+                </div>
+              )}
 
-            <form onSubmit={submit} className="space-y-3">
-              {error && <div role="alert" className="p-3 bg-red-100 text-red-700 rounded-xl text-xs font-bold">{error}</div>}
-
-              <label className="block text-xs font-bold">
-                Usuário ou e-mail
+              <div>
+                <label htmlFor="login-user" className="text-xs font-bold text-slate-700 block mb-1">Usuário</label>
                 <input
+                  id="login-user"
                   type="text"
                   autoComplete="username"
-                  required
                   value={username}
-                  onChange={event => setUsername(event.target.value)}
-                  className="mt-1 w-full px-3 py-2.5 bg-slate-50 border rounded-xl text-sm"
+                  onChange={e => setUsername(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-700"
+                  required
                 />
-              </label>
+              </div>
 
-              <label className="block text-xs font-bold">
-                Senha
+              <div>
+                <label htmlFor="login-pass" className="text-xs font-bold text-slate-700 block mb-1">Senha</label>
                 <input
+                  id="login-pass"
                   type="password"
                   autoComplete="current-password"
-                  required
                   value={password}
-                  onChange={event => setPassword(event.target.value)}
-                  className="mt-1 w-full px-3 py-2.5 bg-slate-50 border rounded-xl text-sm"
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-700"
+                  required
                 />
-              </label>
+              </div>
 
               <button
                 type="submit"
-                disabled={submitting}
-                className="w-full py-3 bg-imperio-green text-yellow-300 font-black rounded-xl disabled:opacity-50"
+                disabled={loading}
+                className="w-full py-3.5 bg-imperio-green hover:bg-emerald-900 disabled:opacity-60 text-yellow-400 font-black rounded-2xl text-sm transition shadow-xl active:scale-[0.98] flex items-center justify-center gap-2"
               >
-                {submitting ? "Autenticando..." : "Entrar no sistema"}
+                {loading ? 'Autenticando...' : 'Entrar no Sistema'}
               </button>
             </form>
           </div>
@@ -1254,7 +1074,8 @@
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
   </script>
 </body>
 </html>
