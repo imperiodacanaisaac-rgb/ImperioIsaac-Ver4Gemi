@@ -139,6 +139,8 @@
     const localDate = (d = new Date()) => d.toLocaleDateString('sv-SE');
     const orderPaidDate = (o) => localDate(new Date(o.closedAt || o.createdAt));
     const hideImg = (e) => { e.currentTarget.style.display = 'none'; };
+    // Nome de exibição tolerante a perfis sem o campo "name"
+    const userLabel = (u) => (u && (u.name || u.nome || u.displayName || u.email)) || 'Balcão';
 
     // Ícones Lucide renderizados como HTML estático (não mutam o DOM do React)
     function Icon({ name, className }) {
@@ -309,14 +311,17 @@
             createdAt: new Date().toISOString(),
             items: [...cart],
             total: cartTotal,
-            atendente: currentUser ? currentUser.name : 'Balcão'
+            atendente: userLabel(currentUser)
           };
           // Não aguardamos o ack do servidor: offline, o Firestore guarda e sincroniza depois
-          db.collection('orders').doc().set(order)
+          db.collection('orders').doc().set(JSON.parse(JSON.stringify(order)))
             .catch(() => notify(`Falha ao gravar ${id}. Refaça o pedido.`, 'err'));
           notify(isDbConnected ? `Comanda ${id} lançada.` : `Comanda ${id} salva offline; será enviada ao reconectar.`);
           setCart([]);
           setCustomerName('');
+        } catch (err) {
+          console.error('Erro ao lançar pedido:', err);
+          notify('Erro ao lançar o pedido: ' + (err.message || 'tente novamente'), 'err');
         } finally {
           setSaving(false);
         }
@@ -433,7 +438,7 @@
 
             <div className="flex items-center space-x-2">
               <span className="text-xs bg-emerald-900/80 px-2.5 py-1 rounded-full font-bold text-yellow-300 border border-emerald-700 uppercase">
-                {currentUser.name}
+                {userLabel(currentUser)}
               </span>
               <button onClick={handleLogout} aria-label="Sair" className="p-2 bg-red-600/80 hover:bg-red-600 rounded-xl text-white transition">
                 <Icon name="log-out" className="w-4 h-4" />
@@ -482,7 +487,7 @@
                 <span className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
                 <span className="text-[10px] text-emerald-200 font-semibold">{isDbConnected ? 'Nuvem Conectada' : 'Modo Offline'}</span>
               </div>
-              <div className="text-xs font-bold text-yellow-300 uppercase truncate">{currentUser.name}</div>
+              <div className="text-xs font-bold text-yellow-300 uppercase truncate">{userLabel(currentUser)}</div>
               <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 py-2.5 bg-red-600/80 hover:bg-red-600 rounded-xl text-white text-xs font-bold transition">
                 <Icon name="log-out" className="w-4 h-4" /> Sair
               </button>
