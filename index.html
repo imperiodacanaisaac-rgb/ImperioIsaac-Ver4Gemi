@@ -131,9 +131,20 @@
 
     const FLAVORS = ['Puro', 'Limão', 'Maracujá', 'Caju', 'Abacaxi'];
 
-    // Perfis com acesso ao Caixa. Qualquer outro valor (ou ausência de role) NÃO tem acesso.
+    // Perfis: DEV e ADMIN (gestores) e BALCAO (atendentes; "ATENDENTE" é aceito como sinônimo).
     // Ajuste conforme o campo "role" gravado em usuarios/{uid}.
-    const MANAGER_ROLES = ['ADMIN', 'GERENTE', 'DEV'];
+    const normRole = (r) => { const x = String(r || '').toUpperCase(); return x === 'ATENDENTE' ? 'BALCAO' : x; };
+    const isGestorRole = (r) => ['DEV', 'ADMIN'].includes(normRole(r));
+    const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    const splitOrder = (o) => {
+      let pasteis = 0, caldosBebidas = 0;
+      (o.items || []).forEach(it => {
+        const v = (it.price || 0) * (it.quantity || 0), c = it.category || '';
+        if (c.includes('Pastéis')) pasteis += v;
+        else if (c.includes('Caldo') || c.includes('Bebidas')) caldosBebidas += v;
+      });
+      return { pasteis, caldosBebidas };
+    };
 
     // Data local (YYYY-MM-DD) — evita o desvio de fuso do toISOString (UTC)
     const localDate = (d = new Date()) => d.toLocaleDateString('sv-SE');
@@ -141,6 +152,103 @@
     const hideImg = (e) => { e.currentTarget.style.display = 'none'; };
     // Nome de exibição tolerante a perfis sem o campo "name"
     const userLabel = (u) => (u && (u.name || u.nome || u.displayName || u.email)) || 'Balcão';
+
+    // ===== Impressora térmica Bluetooth (BLE) =====
+    const PRINTER_SERVICES = [0xff00, 0xffe0, 0x18f0, 0xfee7, 0xae30, 0xfff0,
+      '49535343-fe7d-4ae5-8fa9-9fafd205e455', 'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+      '0000ff00-0000-1000-8000-00805f9b34fb'];
+    const printerBt = { device: null, char: null, handler: null };
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    async function btConnect(device) {
+      const server = await device.gatt.connect();
+      const services = await server.getPrimaryServices();
+      for (const svc of services) {
+        try {
+          const chars = await svc.getCharacteristics();
+          const w = chars.find(c => c.properties.writeWithoutResponse || c.properties.write);
+          if (w) { printerBt.char = w; printerBt.device = device; return; }
+        } catch (e) {}
+      }
+      throw new Error('Nenhum canal de escrita encontrado nesta impressora.');
+    }
+    async function btAttach(device, setOn) {
+      if (printerBt.device && printerBt.handler) printerBt.device.removeEventListener('gattserverdisconnected', printerBt.handler);
+      const handler = async () => {
+        setOn(false);
+        for (let i = 0; i < 3; i++) {
+          await sleep(2000);
+          try { await btConnect(device); setOn(true); return; } catch (e) {}
+        }
+      };
+      printerBt.handler = handler;
+      device.addEventListener('gattserverdisconnected', handler);
+      await btConnect(device);
+    }
+    function btDetach() {
+      try {
+        if (printerBt.device) {
+          printerBt.device.removeEventListener('gattserverdisconnected', printerBt.handler);
+          if (printerBt.device.gatt.connected) printerBt.device.gatt.disconnect();
+        }
+      } catch (e) {}
+      printerBt.device = null; printerBt.char = null; printerBt.handler = null;
+    }
+    async function btWrite(bytes) {
+      if (!printerBt.device) throw new Error('Impressora não conectada');
+      if (!printerBt.device.gatt.connected || !printerBt.char) await btConnect(printerBt.device);
+      const c = printerBt.char;
+      for (let i = 0; i < bytes.length; i += 100) {
+        const chunk = bytes.slice(i, i + 100);
+        if (c.properties.writeWithoutResponse) await c.writeValueWithoutResponse(chunk);
+        else await c.writeValue(chunk);
+        await sleep(30);
+      }
+    }
+    const ascii = (t) => String(t == null ? '' : t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '?');
+
+    function buildTicket(order, cols) {
+      const enc = new TextEncoder(), parts = [];
+      const cmd = (...b) => parts.push(Uint8Array.from(b));
+      const text = (t) => parts.push(enc.encode(ascii(t) + '\n'));
+      const two = (L, R) => L.padEnd(cols - R.length, ' ') + R;
+      const item = (l, r) => {
+        const L = ascii(l), R = ascii(r);
+        if (L.length + R.length < cols) return text(two(L, R));
+        for (let i = 0; i < L.length; i += cols) text(L.slice(i, i + cols));
+        text(' '.repeat(cols - R.length) + R);
+      };
+      const dash = '-'.repeat(cols);
+      cmd(0x1b, 0x40);
+      cmd(0x1b, 0x61, 1); cmd(0x1b, 0x45, 1); cmd(0x1d, 0x21, 0x11); text('IMPERIO DA CANA'); cmd(0x1d, 0x21, 0);
+      cmd(0x1b, 0x45, 0); text('PASTEL E CALDO DE CANA'); text('Tel: (14) 99843-8050'); text(dash);
+      cmd(0x1b, 0x61, 0); cmd(0x1b, 0x45, 1); text('COMANDA: ' + order.id); cmd(0x1b, 0x45, 0);
+      text('Cliente: ' + order.customer); text('Local: ' + order.type);
+      text('Data: ' + new Date(order.createdAt).toLocaleString('pt-BR')); text(dash);
+      (order.items || []).forEach(it => item(`${it.quantity}x ${it.nameWithFlavor || it.name}`, ((it.price || 0) * (it.quantity || 0)).toFixed(2)));
+      text(dash);
+      cmd(0x1b, 0x45, 1); item('TOTAL', 'R$ ' + (order.total || 0).toFixed(2)); cmd(0x1b, 0x45, 0);
+      if (order.atendente) text('Atendente: ' + order.atendente);
+      cmd(0x1b, 0x61, 1); text('Obrigado pela preferencia!'); cmd(0x1b, 0x64, 4);
+      const out = new Uint8Array(parts.reduce((a, x) => a + x.length, 0));
+      let o = 0; parts.forEach(x => { out.set(x, o); o += x.length; });
+      return out;
+    }
+
+    function Status({ cloud, printer }) {
+      return (
+        <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${cloud ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+            <span className="text-[10px] text-emerald-200 font-semibold">{cloud ? 'Nuvem Conectada' : 'Modo Offline'}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${printer ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
+            <span className="text-[10px] text-emerald-200 font-semibold">{printer ? 'Impressora conectada' : 'Impressora desconectada'}</span>
+          </div>
+        </div>
+      );
+    }
 
     // Ícones Lucide renderizados como HTML estático (não mutam o DOM do React)
     function Icon({ name, className }) {
@@ -162,6 +270,15 @@
       const [authReady, setAuthReady] = useState(!auth);
       const [toast, setToast] = useState(null);
       const [saving, setSaving] = useState(false);
+      const [printerOn, setPrinterOn] = useState(false);
+      const [printerName, setPrinterName] = useState('');
+      const [printerBusy, setPrinterBusy] = useState(false);
+      const [printerCols, setPrinterCols] = useState(() => { try { return Number(localStorage.getItem('imperio_cols')) || 32; } catch (e) { return 32; } });
+      const [printPrompt, setPrintPrompt] = useState(null);
+      const [balYear, setBalYear] = useState(new Date().getFullYear());
+      const [balData, setBalData] = useState(null);
+      const [balLoading, setBalLoading] = useState(false);
+      const [balNonce, setBalNonce] = useState(0);
 
       const [activeTab, setActiveTab] = useState('pdv');
       const [orders, setOrders] = useState([]);
@@ -233,7 +350,7 @@
 
       const handleLoginSuccess = (userData) => {
         setCurrentUser(userData);
-        setActiveTab(MANAGER_ROLES.includes(String(userData.role).toUpperCase()) ? 'dashboard' : 'pdv');
+        setActiveTab(isGestorRole(userData.role) ? 'dashboard' : 'pdv');
       };
 
       const handleLogout = () => {
@@ -317,6 +434,7 @@
           db.collection('orders').doc().set(JSON.parse(JSON.stringify(order)))
             .catch(() => notify(`Falha ao gravar ${id}. Refaça o pedido.`, 'err'));
           notify(isDbConnected ? `Comanda ${id} lançada.` : `Comanda ${id} salva offline; será enviada ao reconectar.`);
+          setPrintPrompt(order);
           setCart([]);
           setCustomerName('');
         } catch (err) {
@@ -335,7 +453,14 @@
           await db.runTransaction(async (tx) => {
             const snap = await tx.get(ref);
             if (snap.data().paymentStatus === 'Pago') throw new Error('already');
+            const o = snap.data();
+            const g = splitOrder(o);
+            const FV = firebase.firestore.FieldValue;
             tx.update(ref, { paymentStatus: 'Pago', paymentMethod: method, closedAt: new Date().toISOString() });
+            tx.set(db.collection('resumos').doc(localDate().slice(0, 7)), {
+              pasteis: FV.increment(g.pasteis), caldosBebidas: FV.increment(g.caldosBebidas),
+              total: FV.increment(o.total || 0), pedidos: FV.increment(1)
+            }, { merge: true });
           });
           notify(`${orderId} paga em ${method}.`);
         } catch (e) {
@@ -365,6 +490,62 @@
         document.body.classList.remove('print-ticket');
         document.body.classList.add('print-report');
         setTimeout(() => window.print(), 150);
+      };
+
+      const connectPrinter = async () => {
+        if (!navigator.bluetooth) return notify('Este navegador não suporta Bluetooth. Use o Chrome/Edge no PC ou no Android.', 'err');
+        setPrinterBusy(true);
+        try {
+          const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: PRINTER_SERVICES });
+          await btAttach(device, setPrinterOn);
+          setPrinterName(device.name || 'Impressora');
+          setPrinterOn(true);
+          try { localStorage.setItem('imperio_printer', device.id); } catch (e) {}
+          notify('Impressora conectada.');
+        } catch (e) {
+          if (e.name !== 'NotFoundError') notify('Não foi possível conectar: ' + e.message, 'err');
+        }
+        setPrinterBusy(false);
+      };
+      const disconnectPrinter = () => {
+        btDetach(); setPrinterOn(false); setPrinterName('');
+        try { localStorage.removeItem('imperio_printer'); } catch (e) {}
+      };
+      const changeCols = (c) => { setPrinterCols(c); try { localStorage.setItem('imperio_cols', String(c)); } catch (e) {} };
+      const printOrder = async (order) => {
+        if (printerOn) {
+          try { await btWrite(buildTicket(order, printerCols)); notify(`Comanda ${order.id} enviada para a impressora.`); return; }
+          catch (e) { setPrinterOn(false); notify('Falha na impressora Bluetooth; abrindo a impressão do navegador.', 'err'); }
+        }
+        handlePrintTicket(order);
+      };
+      const printTest = () => printOrder({ id: 'TESTE', customer: 'Teste de impressão', type: 'Balcão', createdAt: new Date().toISOString(),
+        items: [{ quantity: 1, nameWithFlavor: 'Pastel de Carne', price: 12 }], total: 12, atendente: userLabel(currentUser) });
+
+      const recalcYear = async () => {
+        if (!db || !confirm(`Recalcular os 12 meses de ${balYear} a partir dos pedidos pagos?`)) return;
+        setBalLoading(true);
+        try {
+          const snap = await db.collection('orders')
+            .where('closedAt', '>=', new Date(balYear, 0, 1).toISOString())
+            .where('closedAt', '<', new Date(balYear + 1, 0, 1).toISOString()).get();
+          const m = {};
+          snap.forEach(d => {
+            const o = d.data();
+            if (o.paymentStatus !== 'Pago') return;
+            const key = localDate(new Date(o.closedAt)).slice(0, 7), g = splitOrder(o);
+            const r = m[key] || (m[key] = { pasteis: 0, caldosBebidas: 0, total: 0, pedidos: 0 });
+            r.pasteis += g.pasteis; r.caldosBebidas += g.caldosBebidas; r.total += o.total || 0; r.pedidos += 1;
+          });
+          const batch = db.batch();
+          for (let i = 1; i <= 12; i++) {
+            const key = `${balYear}-${String(i).padStart(2, '0')}`;
+            batch.set(db.collection('resumos').doc(key), m[key] || { pasteis: 0, caldosBebidas: 0, total: 0, pedidos: 0 });
+          }
+          await batch.commit();
+          notify('Balanço recalculado.');
+          setBalNonce(n => n + 1);
+        } catch (e) { notify('Falha ao recalcular: ' + e.message, 'err'); setBalLoading(false); }
       };
 
       const visibleOrders = orders.filter(o => o.paymentStatus !== 'Pago' || orderPaidDate(o) === localDate());
@@ -406,7 +587,36 @@
         return { todayStr, todayOrders, totalOrders: todayOrders.length, totalRevenue, pastelCount, pastelRevenue, beverageCount, beverageRevenue, payments };
       }, [orders]);
 
-      const canSeeCash = !!currentUser && MANAGER_ROLES.includes(String(currentUser.role).toUpperCase());
+      const role = normRole(currentUser && currentUser.role);
+      const isDev = role === 'DEV';
+      const isGestor = role === 'DEV' || role === 'ADMIN';
+      const canSeeCash = isGestor; // imprimir relatório de fechamento
+      const navCls = (t) => `w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition ${activeTab === t ? 'bg-yellow-400 text-green-950 shadow-lg' : 'hover:bg-emerald-800 text-emerald-100'}`;
+
+      // Balanço mensal: lê os 12 resumos do ano (só gestores)
+      useEffect(() => {
+        if (activeTab !== 'balanco' || !isGestor || !db) return;
+        let off = false;
+        setBalLoading(true);
+        Promise.all(Array.from({ length: 12 }, (_, i) =>
+          db.collection('resumos').doc(`${balYear}-${String(i + 1).padStart(2, '0')}`).get()))
+          .then(snaps => { if (!off) setBalData(snaps.map(x => x.exists ? x.data() : {})); })
+          .catch(() => notify('Não foi possível carregar o balanço.', 'err'))
+          .finally(() => { if (!off) setBalLoading(false); });
+        return () => { off = true; };
+      }, [activeTab, balYear, balNonce, isGestor]);
+
+      // Reconecta sozinha à impressora já autorizada (Chrome/Edge recentes)
+      useEffect(() => {
+        if (!currentUser || !navigator.bluetooth || !navigator.bluetooth.getDevices) return;
+        (async () => {
+          try {
+            const id = localStorage.getItem('imperio_printer');
+            const d = (await navigator.bluetooth.getDevices()).find(x => x.id === id);
+            if (d) { await btAttach(d, setPrinterOn); setPrinterName(d.name || 'Impressora'); setPrinterOn(true); }
+          } catch (e) {}
+        })();
+      }, [!!currentUser]);
 
       if (!authReady) {
         return <div className="min-h-screen bg-imperio-green flex items-center justify-center text-yellow-400 font-black">Carregando...</div>;
@@ -429,10 +639,7 @@
               />
               <div>
                 <h1 className="font-extrabold text-yellow-400 text-sm tracking-wide leading-tight">IMPÉRIO DA CANA</h1>
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                  <span className="text-[10px] text-emerald-200 font-semibold">{isDbConnected ? 'Nuvem Conectada' : 'Modo Offline'}</span>
-                </div>
+                <Status cloud={isDbConnected} printer={printerOn} />
               </div>
             </div>
 
@@ -460,8 +667,7 @@
             </div>
 
             <nav className="p-4 space-y-2 flex-1">
-              {canSeeCash && (
-                <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition ${activeTab === 'dashboard' ? 'bg-yellow-400 text-green-950 shadow-lg' : 'hover:bg-emerald-800 text-emerald-100'}`}>
+              {( <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl text-sm font-bold transition ${activeTab === 'dashboard' ? 'bg-yellow-400 text-green-950 shadow-lg' : 'hover:bg-emerald-800 text-emerald-100'}`}>
                   <Icon name="layout-dashboard" className="w-5 h-5" />
                   <span>Caixa Diário</span>
                 </button>
@@ -481,12 +687,19 @@
                 <Icon name="utensils" className="w-5 h-5" />
                 <span>Cozinha</span>
               </button>
+              {isGestor && (
+                <button onClick={() => setActiveTab('balanco')} className={navCls('balanco')}>
+                  <Icon name="trending-up" className="w-5 h-5" />
+                  <span>Balanço Mensal</span>
+                </button>
+              )}
+              <button onClick={() => setActiveTab('impressao')} className={navCls('impressao')}>
+                <Icon name="printer" className="w-5 h-5" />
+                <span>Impressão</span>
+              </button>
             </nav>
           <div className="p-4 border-t border-emerald-800/80 space-y-3">
-              <div className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${isDbConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                <span className="text-[10px] text-emerald-200 font-semibold">{isDbConnected ? 'Nuvem Conectada' : 'Modo Offline'}</span>
-              </div>
+              <Status cloud={isDbConnected} printer={printerOn} />
               <div className="text-xs font-bold text-yellow-300 uppercase truncate">{userLabel(currentUser)}</div>
               <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 py-2.5 bg-red-600/80 hover:bg-red-600 rounded-xl text-white text-xs font-bold transition">
                 <Icon name="log-out" className="w-4 h-4" /> Sair
@@ -496,7 +709,7 @@
 
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 fade-in">
 
-            {activeTab === 'dashboard' && canSeeCash && (
+            {activeTab === 'dashboard' && (
               <div className="space-y-5">
                 <div className="bg-gradient-to-br from-emerald-900 via-imperio-green to-emerald-950 text-white p-6 rounded-3xl shadow-xl border border-emerald-700/50">
                   <div className="flex justify-between items-center pb-4 border-b border-emerald-700/60">
@@ -506,9 +719,8 @@
                       </span>
                       <h2 className="text-2xl font-black text-white mt-2">Balanço de Vendas</h2>
                     </div>
-                    <button onClick={handlePrintCashReport} className="p-3 bg-yellow-400 text-emerald-950 rounded-2xl font-extrabold text-xs shadow-lg hover:bg-yellow-300 transition flex items-center gap-1.5">
-                      <Icon name="printer" className="w-4 h-4" /> Imprimir Relatório
-                    </button>
+                    {canSeeCash && <button onClick={handlePrintCashReport} className="p-3 bg-yellow-400 text-emerald-950 rounded-2xl font-extrabold text-xs shadow-lg hover:bg-yellow-300 transition flex items-center gap-1.5">
+                      <Icon name="printer" className="w-4 h-4" /> Imprimir Relatório </button>}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
@@ -546,6 +758,106 @@
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'balanco' && isGestor && (() => {
+              const rows = (balData || Array(12).fill({})).map((r, i) => ({ m: MONTHS[i], p: r.pasteis || 0, c: r.caldosBebidas || 0, t: r.total || 0, n: r.pedidos || 0 }));
+              const tot = rows.reduce((a, r) => ({ p: a.p + r.p, c: a.c + r.c, t: a.t + r.t, n: a.n + r.n }), { p: 0, c: 0, t: 0, n: 0 });
+              const max = Math.max(1, ...rows.map(r => r.p + r.c));
+              const brl = (v) => 'R$ ' + v.toFixed(2).replace('.', ',');
+              const cy = new Date().getFullYear();
+              return (
+                <div className="space-y-5">
+                  <div className="bg-gradient-to-br from-emerald-900 via-imperio-green to-emerald-950 text-white p-6 rounded-3xl shadow-xl border border-emerald-700/50">
+                    <div className="flex flex-wrap justify-between items-center gap-3 pb-4 border-b border-emerald-700/60">
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider bg-yellow-400 text-emerald-950 px-3 py-1 rounded-full">Entradas do ano</span>
+                        <h2 className="text-2xl font-black mt-2">Balanço Mensal</h2>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="bal-year" className="text-xs font-bold text-emerald-200">Ano</label>
+                        <select id="bal-year" value={balYear} onChange={e => setBalYear(Number(e.target.value))} className="px-3 py-2 rounded-xl bg-emerald-950 border border-emerald-700 text-yellow-300 text-sm font-bold">
+                          {[cy - 2, cy - 1, cy].map(y => <option key={y} value={y}>{y}</option>)}
+                        </select>
+                        {isDev && <button onClick={recalcYear} className="px-3 py-2 rounded-xl bg-yellow-400 text-emerald-950 text-xs font-extrabold">Recalcular ano</button>}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4">
+                      <div className="bg-emerald-950/60 p-4 rounded-2xl"><span className="text-xs text-emerald-300 font-bold">Total do ano</span><p className="text-2xl font-black text-yellow-400">{brl(tot.t)}</p><span className="text-[10px] text-emerald-200">{tot.n} comandas liquidadas</span></div>
+                      <div className="bg-emerald-950/60 p-4 rounded-2xl"><span className="text-xs text-emerald-300 font-bold">Pastéis</span><p className="text-2xl font-black text-white">{brl(tot.p)}</p></div>
+                      <div className="bg-emerald-950/60 p-4 rounded-2xl"><span className="text-xs text-emerald-300 font-bold">Caldos + Bebidas</span><p className="text-2xl font-black text-white">{brl(tot.c)}</p></div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-5">
+                    {balLoading && <p className="text-xs font-bold text-slate-500 mb-2">Carregando...</p>}
+                    <div className="flex items-end gap-1.5 sm:gap-3 h-52">
+                      {rows.map(r => (
+                        <div key={r.m} className="flex-1 h-full flex flex-col justify-end items-center" title={`${r.m}: ${brl(r.t)}`}>
+                          <div className="w-full flex flex-col justify-end rounded-t-lg overflow-hidden" style={{ height: `${((r.p + r.c) / max) * 100}%` }}>
+                            <div className="bg-yellow-400" style={{ flex: r.c }}></div>
+                            <div className="bg-emerald-800" style={{ flex: r.p }}></div>
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-500 mt-1">{r.m}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-4 mt-3 text-[11px] font-bold text-slate-600">
+                      <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-800"></span>Pastéis</span>
+                      <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-400"></span>Caldos + Bebidas</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                        <th className="p-3">Mês</th><th className="p-3 text-right">Pastéis</th><th className="p-3 text-right">Caldos + Bebidas</th><th className="p-3 text-right">Total</th><th className="p-3 text-right">Comandas</th>
+                      </tr></thead>
+                      <tbody>
+                        {rows.map(r => (
+                          <tr key={r.m} className="border-b border-slate-100">
+                            <td className="p-3 font-bold">{r.m}</td><td className="p-3 text-right">{brl(r.p)}</td><td className="p-3 text-right">{brl(r.c)}</td><td className="p-3 text-right font-bold">{brl(r.t)}</td><td className="p-3 text-right">{r.n}</td>
+                          </tr>
+                        ))}
+                        <tr className="bg-slate-50 font-black">
+                          <td className="p-3">Total</td><td className="p-3 text-right">{brl(tot.p)}</td><td className="p-3 text-right">{brl(tot.c)}</td><td className="p-3 text-right">{brl(tot.t)}</td><td className="p-3 text-right">{tot.n}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {activeTab === 'impressao' && (
+              <div className="max-w-xl mx-auto bg-white rounded-3xl shadow-sm border border-slate-200 p-6 space-y-4">
+                <h2 className="text-xl font-black text-emerald-950">Impressora Bluetooth</h2>
+                <div className={`flex items-center gap-2 p-3 rounded-2xl text-sm font-bold ${printerOn ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'}`}>
+                  <span className={`w-2.5 h-2.5 rounded-full ${printerOn ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                  {printerOn ? `Impressora conectada${printerName ? ': ' + printerName : ''}` : 'Impressora desconectada'}
+                </div>
+                <div>
+                  <label htmlFor="paper" className="text-xs font-bold text-slate-700 block mb-1">Largura do papel</label>
+                  <select id="paper" value={printerCols} onChange={e => changeCols(Number(e.target.value))} className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold">
+                    <option value={32}>58 mm (32 colunas)</option>
+                    <option value={48}>80 mm (48 colunas)</option>
+                  </select>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button onClick={connectPrinter} disabled={printerBusy} className="flex-1 py-3 bg-imperio-green text-yellow-400 font-black rounded-2xl text-sm disabled:opacity-60">
+                    {printerBusy ? 'Procurando...' : (printerOn ? 'Trocar impressora' : 'Procurar e conectar')}
+                  </button>
+                  {printerOn && (
+                    <>
+                      <button onClick={printTest} className="flex-1 py-3 bg-yellow-400 text-emerald-950 font-black rounded-2xl text-sm">Imprimir teste</button>
+                      <button onClick={disconnectPrinter} className="flex-1 py-3 bg-slate-200 text-slate-800 font-bold rounded-2xl text-sm">Desconectar</button>
+                    </>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Ligue a impressora, deixe-a por perto e toque em "Procurar e conectar". Funciona no Chrome/Edge (PC ou Android) com impressoras Bluetooth BLE. Sem conexão, a impressão usa o diálogo normal do navegador.
+                </p>
               </div>
             )}
 
@@ -746,7 +1058,7 @@
                           ) : (
                             <div className="flex justify-between items-center text-xs text-slate-500 pt-1">
                               <span>Pago em <strong>{order.paymentMethod}</strong></span>
-                              <button onClick={() => handlePrintTicket(order)} className="px-3 py-1 bg-slate-200 text-slate-800 rounded-lg font-bold">Imprimir Cupom</button>
+                              <button onClick={() => printOrder(order)} className="px-3 py-1 bg-slate-200 text-slate-800 rounded-lg font-bold">Imprimir Cupom</button>
                             </div>
                           )}
                         </div>
@@ -819,9 +1131,7 @@
           </main>
 
           <nav className="md:hidden fixed bottom-0 left-0 right-0 glass-header border-t border-emerald-800/80 px-2 py-2 flex justify-around items-center z-40">
-            {canSeeCash && (
-              <button
-                onClick={() => setActiveTab('dashboard')}
+            {( <button onClick={() => setActiveTab('dashboard')}
                 className={`flex flex-col items-center py-1 px-3 rounded-2xl transition ${activeTab === 'dashboard' ? 'text-yellow-400 font-bold' : 'text-emerald-200'}`}
               >
                 <Icon name="layout-dashboard" className="w-5 h-5" />
@@ -851,6 +1161,16 @@
             >
               <Icon name="utensils" className="w-5 h-5" />
               <span className="text-[10px] mt-0.5">Cozinha</span>
+            </button>
+          {isGestor && (
+              <button onClick={() => setActiveTab('balanco')} className={`flex flex-col items-center py-1 px-2 rounded-2xl transition ${activeTab === 'balanco' ? 'text-yellow-400 font-bold' : 'text-emerald-200'}`}>
+                <Icon name="trending-up" className="w-5 h-5" />
+                <span className="text-[10px] mt-0.5">Balanço</span>
+              </button>
+            )}
+            <button onClick={() => setActiveTab('impressao')} className={`flex flex-col items-center py-1 px-2 rounded-2xl transition ${activeTab === 'impressao' ? 'text-yellow-400 font-bold' : 'text-emerald-200'}`}>
+              <Icon name="printer" className="w-5 h-5" />
+              <span className="text-[10px] mt-0.5">Impressão</span>
             </button>
           </nav>
 
@@ -882,6 +1202,21 @@
           )}
 
           </div>
+
+          {printPrompt && (
+            <div className="print:hidden fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
+              <div role="dialog" aria-modal="true" className="bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
+                <h3 className="text-lg font-black text-emerald-950">Comanda {printPrompt.id} lançada!</h3>
+                <p className="text-sm text-slate-600">Deseja imprimir a comanda?{!printerOn && ' (Impressora Bluetooth desconectada: abrirá a impressão do navegador.)'}</p>
+                <div className="flex gap-3">
+                  <button onClick={() => setPrintPrompt(null)} className="flex-1 py-3 rounded-2xl bg-slate-200 text-slate-800 font-bold text-sm">Não imprimir</button>
+                  <button onClick={() => { const o = printPrompt; setPrintPrompt(null); printOrder(o); }} className="flex-1 py-3 rounded-2xl bg-imperio-green text-yellow-400 font-black text-sm flex items-center justify-center gap-2">
+                    <Icon name="printer" className="w-4 h-4" /> Imprimir
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {toast && (
             <div className={`print:hidden fixed top-4 left-1/2 -translate-x-1/2 z-[60] px-4 py-3 rounded-2xl shadow-xl text-xs font-extrabold ${toast.type === 'err' ? 'bg-red-600 text-white' : 'bg-emerald-700 text-white'}`}>

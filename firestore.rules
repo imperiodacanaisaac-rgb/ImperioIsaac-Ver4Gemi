@@ -1,35 +1,52 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function signedIn() { return request.auth != null; }
-
-    function profile() {
+    function perfil() {
       return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
     }
+    function logado()   { return request.auth != null && perfil().ativo == true; }
+    function ehDev()    { return logado() && perfil().role == 'DEV'; }
+    function ehAdmin()  { return logado() && perfil().role == 'ADMIN'; }
+    function ehGestor() { return logado() && perfil().role in ['ADMIN', 'DEV']; }
 
-    // Usuário autenticado, com perfil existente e ativo
-    function isActive() {
-      return signedIn()
-        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
-        && profile().ativo == true;
-    }
-
-    // Cada usuário lê só o próprio perfil; ninguém altera perfis pelo app
+    // Perfis: o próprio usuário lê o seu; DEV lê todos; ADMIN lê só os de balcão.
+    // Ninguém altera perfis pelo app (faça isso pelo Console do Firebase).
     match /usuarios/{uid} {
-      allow read: if signedIn() && request.auth.uid == uid;
+      allow get: if logado() && (
+        request.auth.uid == uid || ehDev() ||
+        (ehAdmin() && resource.data.role in ['BALCAO', 'ATENDENTE'])
+      );
+      allow list: if logado() && (
+        ehDev() || (ehAdmin() && resource.data.role in ['BALCAO', 'ATENDENTE'])
+      );
       allow write: if false;
     }
 
-    // Pedidos: sem exclusão pelo app
-    match /orders/{orderId} {
-      allow read, create, update: if isActive();
+    // Pedidos: qualquer usuário ativo lança, paga e muda status; ninguém apaga.
+    match /orders/{id} {
+      allow read, create, update: if logado();
       allow delete: if false;
     }
 
     // Contador diário de comandas
     match /counters/{day} {
-      allow read, write: if isActive();
+      allow read, create, update: if logado();
+      allow delete: if false;
+    }
+
+    // Resumos mensais do Balanço: o balcão só grava (ao receber pagamento);
+    // quem lê é apenas DEV/ADMIN.
+    match /resumos/{mes} {
+      allow read: if ehGestor();
+      allow create, update: if logado();
+      allow delete: if false;
+    }
+
+    // Todo o resto fica bloqueado
+    match /{outro=**} {
+      allow read, write: if false;
     }
   }
 }
