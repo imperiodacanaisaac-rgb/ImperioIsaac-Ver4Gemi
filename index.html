@@ -150,6 +150,7 @@
     const localDate = (d = new Date()) => d.toLocaleDateString('sv-SE');
     const orderPaidDate = (o) => localDate(new Date(o.closedAt || o.createdAt));
     const hideImg = (e) => { e.currentTarget.style.display = 'none'; };
+    const APP_VERSION = 'v3 • 19/11/2026'; // mude a cada publicação para conferir o deploy
     // Nome de exibição tolerante a perfis sem o campo "name"
     const userLabel = (u) => (u && (u.name || u.nome || u.displayName || u.email)) || 'Balcão';
 
@@ -790,8 +791,8 @@
               <Status cloud={isDbConnected} printer={printerOn} />
               <div className="text-xs font-bold text-yellow-300 uppercase truncate">{userLabel(currentUser)}</div>
               <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 py-2.5 bg-red-600/80 hover:bg-red-600 rounded-xl text-white text-xs font-bold transition">
-                <Icon name="log-out" className="w-4 h-4" /> Sair
-              </button>
+                <Icon name="log-out" className="w-4 h-4" /> Sair </button>
+              <div className="text-[10px] text-emerald-400/70 text-center">Versão {APP_VERSION}</div>
             </div>
           </aside>
 
@@ -1549,6 +1550,7 @@
               />
               <h1 className="text-2xl font-black text-emerald-950 tracking-wide">IMPÉRIO DA CANA</h1>
               <p className="text-xs font-bold text-slate-500">Agudos, SP • Tel: (14) 99843-8050</p>
+              <p className="text-[10px] text-slate-400">Versão {APP_VERSION}</p>
             </div>
 
             <form onSubmit={handleLoginSubmit} className="space-y-4">
