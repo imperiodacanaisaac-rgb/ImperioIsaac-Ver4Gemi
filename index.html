@@ -279,6 +279,10 @@
       const [balData, setBalData] = useState(null);
       const [balLoading, setBalLoading] = useState(false);
       const [balNonce, setBalNonce] = useState(0);
+      const [editingOrder, setEditingOrder] = useState(null);
+      const [cancelTarget, setCancelTarget] = useState(null);
+      const [cancelReason, setCancelReason] = useState('');
+      const [cancelBusy, setCancelBusy] = useState(false);
 
       const [activeTab, setActiveTab] = useState('pdv');
       const [orders, setOrders] = useState([]);
@@ -356,8 +360,7 @@
       const handleLogout = () => {
         if (auth) auth.signOut();
         setCurrentUser(null);
-        setCart([]);
-        setOrders([]);
+        setCart([]); setOrders([]); setEditingOrder(null);
       };
 
       const handleProductClick = (product) => {
@@ -431,10 +434,11 @@
             atendente: userLabel(currentUser)
           };
           // Não aguardamos o ack do servidor: offline, o Firestore guarda e sincroniza depois
-          db.collection('orders').doc().set(JSON.parse(JSON.stringify(order)))
+          const ref = db.collection('orders').doc();
+          ref.set(JSON.parse(JSON.stringify(order)))
             .catch(() => notify(`Falha ao gravar ${id}. Refaça o pedido.`, 'err'));
           notify(isDbConnected ? `Comanda ${id} lançada.` : `Comanda ${id} salva offline; será enviada ao reconectar.`);
-          setPrintPrompt(order);
+          setPrintPrompt({ ...order, docId: ref.id });
           setCart([]);
           setCustomerName('');
         } catch (err) {
@@ -490,6 +494,81 @@
         document.body.classList.remove('print-ticket');
         document.body.classList.add('print-report');
         setTimeout(() => window.print(), 150);
+      };
+
+      const startAddItems = (order) => {
+        if (order.paymentStatus === 'Pago' || order.status === 'Cancelado') return notify('Só é possível adicionar itens em comandas em aberto.', 'err');
+        if (cart.length > 0 && !confirm('O carrinho atual será descartado. Continuar?')) return;
+        setCart([]);
+        setEditingOrder(order);
+        setActiveTab('pdv');
+        notify(`Adicionando itens à ${order.id} (nome e local não mudam).`);
+      };
+
+      const discardCart = () => {
+        if (editingOrder) { setEditingOrder(null); setCart([]); return; }
+        if (confirm('Cancelar este pedido e descartar os itens do carrinho?')) { setCart([]); setCustomerName(''); }
+      };
+
+      const handleAddItems = async () => {
+        if (!editingOrder) return;
+        if (cart.length === 0) return notify('Adicione itens ao carrinho.', 'err');
+        if (!db || !editingOrder.docId) return notify('Comanda ainda não sincronizada.', 'err');
+        if (saving) return;
+        setSaving(true);
+        const ref = db.collection('orders').doc(editingOrder.docId);
+        const now = new Date().toISOString();
+        try {
+          const updated = await db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            const o = snap.data();
+            if (o.paymentStatus === 'Pago' || o.status === 'Cancelado') throw new Error('closed');
+            const items = [...(o.items || []), ...cart.map(c => ({ ...c, addedAt: now }))];
+            const total = Math.round(items.reduce((a, i) => a + (i.price || 0) * (i.quantity || 0), 0) * 100) / 100;
+            const status = (o.status === 'Pronto' || o.status === 'Entregue') ? 'Aguardando' : o.status;
+            tx.update(ref, JSON.parse(JSON.stringify({ items, total, status, lastAddedAt: now })));
+            return { ...o, docId: editingOrder.docId, items, total, status };
+          });
+          notify(`Itens adicionados à ${updated.id}.`);
+          setPrintPrompt({ ...updated, _updated: true });
+          setCart([]);
+          setEditingOrder(null);
+          setActiveTab('comandas');
+        } catch (e) {
+          notify(e.message === 'closed' ? 'Esta comanda já foi paga ou cancelada.' : 'Não foi possível adicionar os itens. Verifique a conexão.', 'err');
+        }
+        setSaving(false);
+      };
+
+      const confirmCancel = async () => {
+        const reason = cancelReason.trim();
+        if (reason.length < 3) return notify('Informe o motivo do cancelamento.', 'err');
+        if (!db || !cancelTarget || !cancelTarget.docId) return notify('Comanda ainda não sincronizada.', 'err');
+        setCancelBusy(true);
+        const ref = db.collection('orders').doc(cancelTarget.docId);
+        try {
+          await db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            const o = snap.data();
+            if (o.status === 'Cancelado') throw new Error('already');
+            const wasPaid = o.paymentStatus === 'Pago';
+            if (wasPaid && !isGestor) throw new Error('paid');
+            tx.update(ref, { status: 'Cancelado', paymentStatus: 'Cancelado', wasPaid, cancelReason: reason,
+              cancelledAt: new Date().toISOString(), cancelledBy: userLabel(currentUser) });
+            if (wasPaid) { // estorna o resumo mensal do balanço
+              const g = splitOrder(o), FV = firebase.firestore.FieldValue;
+              tx.set(db.collection('resumos').doc(orderPaidDate(o).slice(0, 7)), {
+                pasteis: FV.increment(-g.pasteis), caldosBebidas: FV.increment(-g.caldosBebidas),
+                total: FV.increment(-(o.total || 0)), pedidos: FV.increment(-1)
+              }, { merge: true });
+            }
+          });
+          notify(`Comanda ${cancelTarget.id} cancelada.`);
+          setCancelTarget(null); setCancelReason('');
+        } catch (e) {
+          notify(e.message === 'already' ? 'Esta comanda já foi cancelada.' : e.message === 'paid' ? 'Só o administrador cancela comanda já paga.' : 'Não foi possível cancelar. Verifique a conexão.', 'err');
+        }
+        setCancelBusy(false);
       };
 
       const connectPrinter = async () => {
@@ -548,7 +627,11 @@
         } catch (e) { notify('Falha ao recalcular: ' + e.message, 'err'); setBalLoading(false); }
       };
 
-      const visibleOrders = orders.filter(o => o.paymentStatus !== 'Pago' || orderPaidDate(o) === localDate());
+      const visibleOrders = orders.filter(o => {
+        const today = localDate();
+        if (o.paymentStatus === 'Cancelado') return localDate(new Date(o.cancelledAt || o.createdAt)) === today;
+        return o.paymentStatus !== 'Pago' || orderPaidDate(o) === today;
+      });
 
       const cashReport = useMemo(() => {
         const todayStr = localDate();
@@ -922,7 +1005,7 @@
                     <div className="flex justify-between items-center border-b pb-3">
                       <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
                         <Icon name="shopping-cart" className="w-5 h-5 text-emerald-700" />
-                        <span>Carrinho Atual</span>
+                        <span>{editingOrder ? `Adicionar à ${editingOrder.id}` : 'Carrinho Atual'}</span>
                       </h3>
                       <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
                         {cart.length} itens
@@ -991,12 +1074,17 @@
                     </div>
 
                     <button
-                      onClick={handleCreateOrder} disabled={saving}
+                      onClick={editingOrder ? handleAddItems : handleCreateOrder} disabled={saving}
                       className="w-full py-3.5 bg-imperio-green hover:bg-emerald-900 text-yellow-400 font-black rounded-2xl text-sm shadow-xl transition flex items-center justify-center gap-2 active:scale-[0.98]"
                     >
                       <Icon name="circle-check" className="w-5 h-5" />
-                      Lançar Pedido
+                      {editingOrder ? `Adicionar à ${editingOrder.id}` : 'Lançar Pedido'}
                     </button>
+                    {(editingOrder || cart.length > 0) && (
+                      <button onClick={discardCart} className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-2xl text-xs transition">
+                        {editingOrder ? 'Cancelar edição' : 'Cancelar pedido'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1010,7 +1098,7 @@
                     <p className="text-xs text-slate-500">Selecione uma comanda aberta para receber o pagamento</p>
                   </div>
                   <span className="text-xs font-black bg-yellow-400 text-emerald-950 px-3 py-1 rounded-full shadow-sm">
-                    {orders.filter(o => o.paymentStatus !== 'Pago').length} Abertas
+                    {orders.filter(o => o.paymentStatus !== 'Pago' && o.paymentStatus !== 'Cancelado').length} Abertas
                   </span>
                 </div>
 
@@ -1021,15 +1109,15 @@
                     </div>
                   ) : (
                     visibleOrders.map(order => (
-                      <div key={order.docId || order.id} className={`bg-white rounded-3xl shadow-sm border p-4 flex flex-col justify-between ${order.paymentStatus === 'Pago' ? 'border-emerald-300 bg-emerald-50/20' : 'border-yellow-400'}`}>
+                      <div key={order.docId || order.id} className={`bg-white rounded-3xl shadow-sm border p-4 flex flex-col justify-between ${order.paymentStatus === 'Pago' ? 'border-emerald-300 bg-emerald-50/20' : order.paymentStatus === 'Cancelado' ? 'border-red-300 bg-red-50/30 opacity-80' : 'border-yellow-400'}`}>
                         <div>
                           <div className="flex justify-between items-start font-bold text-xs border-b pb-2">
                             <div>
                               <span className="text-emerald-900 font-black text-sm">{order.id}</span>
                               <span className="block font-bold text-slate-700">{order.customer} ({order.type})</span>
                             </div>
-                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold ${order.paymentStatus === 'Pago' ? 'bg-emerald-100 text-emerald-800' : 'bg-yellow-100 text-yellow-900'}`}>
-                              {order.paymentStatus === 'Pago' ? 'Pago' : 'Em Aberto'}
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold ${order.paymentStatus === 'Pago' ? 'bg-emerald-100 text-emerald-800' : order.paymentStatus === 'Cancelado' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-900'}`}>
+                              {order.paymentStatus === 'Pago' ? 'Pago' : order.paymentStatus === 'Cancelado' ? 'Cancelada' : 'Em Aberto'}
                             </span>
                           </div>
 
@@ -1049,16 +1137,31 @@
                             <span className="text-base text-emerald-800">R$ {order.total ? order.total.toFixed(2) : '0.00'}</span>
                           </div>
 
-                          {order.paymentStatus !== 'Pago' ? (
+                          {order.paymentStatus === 'Cancelado' ? (
+                            <div className="text-xs text-red-700 bg-red-50 rounded-xl p-2.5">
+                              <strong>Motivo:</strong> {order.cancelReason || '-'}
+                              <span className="block text-[10px] text-red-500 mt-0.5">por {order.cancelledBy || '-'}{order.cancelledAt ? ' • ' + new Date(order.cancelledAt).toLocaleString('pt-BR') : ''}</span>
+                            </div>
+                          ) : order.paymentStatus !== 'Pago' ? (
+                            <>
                             <div className="grid grid-cols-3 gap-1.5 pt-1">
                               <button onClick={() => handlePayOrder(order.id, order.docId, 'PIX')} className="py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold rounded-xl text-xs shadow-sm">PIX</button>
                               <button onClick={() => handlePayOrder(order.id, order.docId, 'Dinheiro')} className="py-2.5 bg-yellow-400 hover:bg-yellow-500 text-emerald-950 font-extrabold rounded-xl text-xs shadow-sm">Dinheiro</button>
                               <button onClick={() => handlePayOrder(order.id, order.docId, 'Cartão')} className="py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-extrabold rounded-xl text-xs shadow-sm">Cartão</button>
                             </div>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              <button onClick={() => printOrder(order)} className="py-2 bg-slate-200 text-slate-800 rounded-xl font-bold text-xs flex items-center justify-center gap-1"><Icon name="printer" className="w-3.5 h-3.5" /> Imprimir</button>
+                              <button onClick={() => startAddItems(order)} className="py-2 bg-emerald-100 text-emerald-900 rounded-xl font-bold text-xs">+ Itens</button>
+                              <button onClick={() => { setCancelReason(''); setCancelTarget(order); }} className="py-2 bg-red-100 text-red-700 rounded-xl font-bold text-xs">Cancelar</button>
+                            </div>
+                            </>
                           ) : (
                             <div className="flex justify-between items-center text-xs text-slate-500 pt-1">
                               <span>Pago em <strong>{order.paymentMethod}</strong></span>
-                              <button onClick={() => printOrder(order)} className="px-3 py-1 bg-slate-200 text-slate-800 rounded-lg font-bold">Imprimir Cupom</button>
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => printOrder(order)} className="px-3 py-1 bg-slate-200 text-slate-800 rounded-lg font-bold">Imprimir Cupom</button>
+                                {isGestor && <button onClick={() => { setCancelReason(''); setCancelTarget(order); }} className="px-3 py-1 bg-red-100 text-red-700 rounded-lg font-bold">Cancelar</button>}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1096,7 +1199,7 @@
                               <ul className="text-xs space-y-1 my-2 border-t border-b py-2">
                                 {order.items && order.items.map((it, idx) => (
                                   <li key={idx} className="flex flex-col text-slate-800">
-                                    <span className="font-bold">{it.quantity}x {it.nameWithFlavor || it.name}</span>
+                                    <span className="font-bold">{it.quantity}x {it.nameWithFlavor || it.name}{it.addedAt && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-red-600 text-white text-[9px] font-black">NOVO</span>}</span>
                                   </li>
                                 ))}
                               </ul>
@@ -1203,10 +1306,30 @@
 
           </div>
 
+          {cancelTarget && (
+            <div className="print:hidden fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4">
+              <div role="dialog" aria-modal="true" className="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+                <h3 className="text-lg font-black text-red-700">Cancelar comanda {cancelTarget.id}</h3>
+                {cancelTarget.paymentStatus === 'Pago' && <p className="text-xs font-bold text-amber-700 bg-amber-50 rounded-xl p-2.5">Esta comanda já foi paga: o valor será estornado do caixa e do balanço.</p>}
+                <div>
+                  <label htmlFor="cancel-reason" className="text-xs font-bold text-slate-700 block mb-1">Motivo do cancelamento (obrigatório)</label>
+                  <textarea id="cancel-reason" rows={3} autoFocus value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="Ex.: cliente desistiu, pedido em duplicidade..."
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-2 focus:ring-red-400"></textarea>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => { setCancelTarget(null); setCancelReason(''); }} className="flex-1 py-3 rounded-2xl bg-slate-200 text-slate-800 font-bold text-sm">Voltar</button>
+                  <button onClick={confirmCancel} disabled={cancelBusy || cancelReason.trim().length < 3} className="flex-1 py-3 rounded-2xl bg-red-600 text-white font-black text-sm disabled:opacity-50">
+                    {cancelBusy ? 'Cancelando...' : 'Confirmar'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {printPrompt && (
             <div className="print:hidden fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
               <div role="dialog" aria-modal="true" className="bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
-                <h3 className="text-lg font-black text-emerald-950">Comanda {printPrompt.id} lançada!</h3>
+                <h3 className="text-lg font-black text-emerald-950">Comanda {printPrompt.id} {printPrompt._updated ? 'atualizada' : 'lançada'}!</h3>
                 <p className="text-sm text-slate-600">Deseja imprimir a comanda?{!printerOn && ' (Impressora Bluetooth desconectada: abrirá a impressão do navegador.)'}</p>
                 <div className="flex gap-3">
                   <button onClick={() => setPrintPrompt(null)} className="flex-1 py-3 rounded-2xl bg-slate-200 text-slate-800 font-bold text-sm">Não imprimir</button>
@@ -1214,6 +1337,9 @@
                     <Icon name="printer" className="w-4 h-4" /> Imprimir
                   </button>
                 </div>
+                <button onClick={() => { const o = printPrompt; setPrintPrompt(null); setCancelReason(''); setCancelTarget(o); }} className="w-full py-2.5 bg-red-50 text-red-700 font-bold rounded-2xl text-xs">
+                  Cancelar pedido
+                </button>
               </div>
             </div>
           )}
